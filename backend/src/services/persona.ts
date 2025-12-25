@@ -23,6 +23,7 @@ interface PersonaVerificationData {
   address_subdivision: string; // State
   address_postal_code: string;
   identification_number: string; // DL number
+  identification_expiration_date: string; // YYYY-MM-DD
 }
 
 // Create verification inquiry
@@ -114,6 +115,7 @@ export const getVerifiedData = async (inquiryId: string): Promise<PersonaVerific
     address_subdivision: attrs['address-subdivision'],
     address_postal_code: attrs['address-postal-code'],
     identification_number: attrs['identification-number'],
+    identification_expiration_date: attrs['identification-expiration-date'],
   };
 };
 

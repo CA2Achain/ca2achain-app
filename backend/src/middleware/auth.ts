@@ -1,56 +1,51 @@
-import { getSupabase } from './supabase.js';
+import { FastifyRequest, FastifyReply } from 'fastify';
+import { getSupabase } from '../services/supabase.js';
 
-// Send magic link for passwordless login
-export const sendMagicLink = async (email: string, redirectTo?: string) => {
-  const { data, error } = await getSupabase().auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: redirectTo || `${process.env.FRONTEND_URL}/auth/callback`,
-    },
-  });
+export interface AuthUser {
+  id: string;
+  email: string;
+  type: 'user' | 'customer';
+}
 
-  if (error) throw error;
-  return data;
-};
+// Extend FastifyRequest to include user
+declare module 'fastify' {
+  interface FastifyRequest {
+    user?: AuthUser;
+  }
+}
 
-// Verify OTP token
-export const verifyOtp = async (email: string, token: string) => {
-  const { data, error } = await getSupabase().auth.verifyOtp({
-    email,
-    token,
-    type: 'email',
-  });
+// Supabase JWT validation middleware for authenticated users and customers
+export async function authMiddleware(
+  request: FastifyRequest,
+  reply: FastifyReply
+) {
+  try {
+    const authHeader = request.headers.authorization;
 
-  if (error) throw error;
-  return data;
-};
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return reply.status(401).send({ error: 'Missing or invalid authorization header' });
+    }
 
-// Sign out
-export const signOut = async (accessToken: string) => {
-  const { error } = await getSupabase().auth.admin.signOut(accessToken);
-  if (error) throw error;
-};
+    const token = authHeader.substring(7);
 
-// Get user from token
-export const getUserFromToken = async (accessToken: string) => {
-  const { data: { user }, error } = await getSupabase().auth.getUser(accessToken);
-  
-  if (error) throw error;
-  return user;
-};
+    // Verify JWT with Supabase
+    const { data: { user }, error } = await getSupabase().auth.getUser(token);
 
-// Update user metadata
-export const updateUserMetadata = async (userId: string, metadata: Record<string, any>) => {
-  const { data, error } = await getSupabase().auth.admin.updateUserById(userId, {
-    user_metadata: metadata,
-  });
+    if (error || !user) {
+      return reply.status(401).send({ error: 'Invalid token' });
+    }
 
-  if (error) throw error;
-  return data;
-};
+    // Determine if user or customer based on metadata
+    const userType = user.user_metadata?.type || 'user';
 
-// Delete user
-export const deleteUser = async (userId: string) => {
-  const { error } = await getSupabase().auth.admin.deleteUser(userId);
-  if (error) throw error;
-};
+    // Attach user to request
+    request.user = {
+      id: user.id,
+      email: user.email!,
+      type: userType,
+    };
+
+  } catch (error) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+}

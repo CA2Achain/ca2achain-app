@@ -16,9 +16,22 @@ export default async function userRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({ error: 'User not found' });
       }
 
-      // Check if already verified
-      if (user.verified_at) {
-        return reply.status(400).send({ error: 'User already verified' });
+      // Check if already verified and not expired
+      const isExpired = user.verification_expires_at 
+        ? new Date(user.verification_expires_at) < new Date()
+        : false;
+
+      if (user.verified_at && !isExpired) {
+        return reply.status(400).send({ 
+          error: 'User already verified',
+          verified_at: user.verified_at,
+          expires_at: user.verification_expires_at,
+        });
+      }
+
+      // If expired, delete old PII before re-verification
+      if (isExpired) {
+        await deletePIIByUserId(user.id);
       }
 
       // Create Persona inquiry
@@ -27,6 +40,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
       return reply.send({
         inquiry_id: inquiry.id,
         session_token: inquiry.attributes['session-token'],
+        is_reverification: isExpired,
       });
     } catch (error) {
       request.log.error(error);
@@ -97,9 +111,16 @@ export default async function userRoutes(fastify: FastifyInstance) {
 
       const pii = await getPIIByUserId(user.id);
 
+      const isExpired = user.verification_expires_at 
+        ? new Date(user.verification_expires_at) < new Date()
+        : false;
+
       return reply.send({
-        verified: !!user.verified_at,
+        verified: !!user.verified_at && !isExpired,
         verified_at: user.verified_at,
+        expires_at: user.verification_expires_at,
+        is_expired: isExpired,
+        needs_reverification: isExpired,
         has_data: !!pii,
       });
     } catch (error) {

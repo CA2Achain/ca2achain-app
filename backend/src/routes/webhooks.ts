@@ -52,6 +52,7 @@ export default async function webhookRoutes(fastify: FastifyInstance) {
           encrypted_name: encrypt(`${verifiedData.first_name} ${verifiedData.last_name}`),
           encrypted_dob: encrypt(verifiedData.birthdate),
           encrypted_dl_number: encrypt(verifiedData.identification_number),
+          encrypted_dl_expiration: encrypt(verifiedData.identification_expiration_date),
           encrypted_address: encrypt(JSON.stringify({
             street_1: verifiedData.address_street_1,
             street_2: verifiedData.address_street_2,
@@ -61,6 +62,7 @@ export default async function webhookRoutes(fastify: FastifyInstance) {
           })),
           encrypted_polygon_credential: encrypt(credentialJson),
           verified_at: new Date().toISOString(),
+          verification_expires_at: verifiedData.identification_expiration_date,
           verification_provider: 'persona',
           verification_session_id: inquiryId,
         });

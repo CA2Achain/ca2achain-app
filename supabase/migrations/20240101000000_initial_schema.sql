@@ -8,6 +8,7 @@ CREATE TABLE users (
   persona_inquiry_id TEXT,
   polygon_credential_id TEXT,
   verified_at TIMESTAMPTZ,
+  verification_expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -18,9 +19,11 @@ CREATE TABLE pii_vault (
   encrypted_name TEXT NOT NULL,
   encrypted_dob TEXT NOT NULL,
   encrypted_dl_number TEXT NOT NULL,
+  encrypted_dl_expiration TEXT NOT NULL,
   encrypted_address TEXT NOT NULL,
   encrypted_polygon_credential TEXT NOT NULL,
   verified_at TIMESTAMPTZ NOT NULL,
+  verification_expires_at TIMESTAMPTZ NOT NULL,
   verification_provider TEXT NOT NULL,
   verification_session_id TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),

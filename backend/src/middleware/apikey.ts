@@ -15,10 +15,10 @@ declare module 'fastify' {
 }
 
 // API key validation middleware for third-party customers
-export const apiKeyMiddleware = async (
+export async function apiKeyMiddleware(
   request: FastifyRequest,
   reply: FastifyReply
-) => {
+) {
   try {
     const authHeader = request.headers.authorization;
 
@@ -68,4 +68,4 @@ export const apiKeyMiddleware = async (
     request.log.error(error);
     return reply.status(500).send({ error: 'Internal server error' });
   }
-};
+}

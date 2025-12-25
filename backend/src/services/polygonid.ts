@@ -1,5 +1,8 @@
 // Polygon ID service for issuing and verifying credentials
-// This is a simplified implementation - full Polygon ID integration requires more setup
+// NOTE: Polygon ID SDK is not available via npm as a simple package
+// For MVP, we're using simplified implementation
+// Production requires setting up Polygon ID issuer node separately
+// See: https://docs.polygon.technology/polygon-id/
 
 interface PolygonCredential {
   id: string;
@@ -55,11 +58,11 @@ export const issueCredential = async (
   const credential: PolygonCredential = {
     id: `urn:uuid:${crypto.randomUUID()}`,
     credentialSubject: {
-      id: `did:polygonid:polygon:mumbai:${userId}`,
+      id: `did:user:${userId}`, // Simplified DID
       ...claims,
       verification_date: new Date().toISOString(),
     },
-    issuer: process.env.POLYGON_ISSUER_DID!,
+    issuer: 'did:ca2achain:issuer', // Placeholder issuer DID
     issuanceDate: new Date().toISOString(),
   };
 
@@ -94,7 +97,7 @@ export const verifyProof = async (proof: any): Promise<boolean> => {
   // This would verify the cryptographic proof against the issuer's public key
   
   // For now, basic validation
-  return proof && proof.type === 'ZKProof' && proof.issuer === process.env.POLYGON_ISSUER_DID;
+  return proof && proof.type === 'ZKProof' && proof.issuer;
 };
 
 // Store credential (encrypted in Supabase)

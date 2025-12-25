@@ -24,6 +24,15 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ error: 'User not verified' });
       }
 
+      // Check if verification has expired
+      if (user.verification_expires_at && new Date(user.verification_expires_at) < new Date()) {
+        return reply.status(400).send({ 
+          error: 'User verification has expired',
+          expired_at: user.verification_expires_at,
+          message: 'User needs to re-verify with updated ID'
+        });
+      }
+
       // Get encrypted PII and credential
       const pii = await getPIIByUserId(user.id);
       if (!pii) {
