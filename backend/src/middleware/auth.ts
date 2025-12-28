@@ -1,10 +1,10 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { getSupabase } from '../services/supabase.js';
+import { getSupabase, getAuthAccountByEmail } from '../services/supabase.js';
 
 export interface AuthUser {
   id: string;
   email: string;
-  type: 'user' | 'customer';
+  account_type: 'buyer' | 'dealer';
 }
 
 // Extend FastifyRequest to include user
@@ -14,7 +14,7 @@ declare module 'fastify' {
   }
 }
 
-// Supabase JWT validation middleware for authenticated users and customers
+// Supabase JWT validation middleware for authenticated buyers and dealers
 export async function authMiddleware(
   request: FastifyRequest,
   reply: FastifyReply
@@ -23,7 +23,10 @@ export async function authMiddleware(
     const authHeader = request.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return reply.status(401).send({ error: 'Missing or invalid authorization header' });
+      return reply.status(401).send({ 
+        success: false,
+        error: 'Missing or invalid authorization header' 
+      });
     }
 
     const token = authHeader.substring(7);
@@ -32,20 +35,34 @@ export async function authMiddleware(
     const { data: { user }, error } = await getSupabase().auth.getUser(token);
 
     if (error || !user) {
-      return reply.status(401).send({ error: 'Invalid token' });
+      return reply.status(401).send({ 
+        success: false,
+        error: 'Invalid or expired token' 
+      });
     }
 
-    // Determine if user or customer based on metadata
-    const userType = user.user_metadata?.type || 'user';
+    // Get our auth_account record to determine buyer vs dealer
+    const authAccount = await getAuthAccountByEmail(user.email!);
+    
+    if (!authAccount) {
+      return reply.status(401).send({ 
+        success: false,
+        error: 'Auth account not found' 
+      });
+    }
 
-    // Attach user to request
+    // Attach auth account info to request
     request.user = {
-      id: user.id,
-      email: user.email!,
-      type: userType,
+      id: authAccount.id,
+      email: authAccount.email,
+      account_type: authAccount.account_type,
     };
 
   } catch (error) {
-    return reply.status(401).send({ error: 'Unauthorized' });
+    request.log.error('Auth middleware error:', error);
+    return reply.status(401).send({ 
+      success: false,
+      error: 'Authentication failed' 
+    });
   }
 }
