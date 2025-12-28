@@ -1,15 +1,20 @@
 import { z } from 'zod';
 import { 
-  verificationRequestSchema, 
+  verificationRequestSchema,
   privadoProofRequestSchema,
   privadoProofSchema,
-  complianceEventSchema 
+  complianceEventSchema,
+  dealerRequestSchema,
+  blockchainStatusSchema
 } from './schema.js';
 
+// Inferred types from schemas
 export type VerificationRequest = z.infer<typeof verificationRequestSchema>;
 export type PrivadoProofRequest = z.infer<typeof privadoProofRequestSchema>;
 export type PrivadoProof = z.infer<typeof privadoProofSchema>;
 export type ComplianceEvent = z.infer<typeof complianceEventSchema>;
+export type DealerRequest = z.infer<typeof dealerRequestSchema>; // ADDED - was missing
+export type BlockchainStatus = z.infer<typeof blockchainStatusSchema>; // ADDED - was missing
 
 // Extended types for blockchain records
 export interface BlockchainComplianceRecord {
@@ -17,7 +22,7 @@ export interface BlockchainComplianceRecord {
     version: 'AB1263-2026.1';
     verification_id: string;
     timestamp: string;
-    dealer_id_hash: string; // Updated from seller_id_hash
+    dealer_id_hash: string;
   };
   privado_proofs: {
     age_verification: {
@@ -34,7 +39,7 @@ export interface BlockchainComplianceRecord {
   legal_compliance: {
     ab1263_disclosure_attested: boolean;
     acknowledgment_attested: boolean;
-    dealer_signature_hash: string; // Updated from seller_signature_hash
+    dealer_signature_hash: string;
     ca_doj_notice_version: string;
   };
   issuer_authority: {
@@ -59,14 +64,7 @@ export interface VerificationResponse {
 
 // Batch verification types
 export interface BatchVerificationRequest {
-  verifications: Array<{
-    buyer_email: string;
-    buyer_dob: string;
-    shipping_address: string;
-    transaction_id: string;
-    ab1263_disclosure_presented: boolean;
-    acknowledgment_received: boolean;
-  }>;
+  verifications: VerificationRequest[]; // UPDATED - use proper type instead of inline
 }
 
 export interface BatchVerificationResponse {

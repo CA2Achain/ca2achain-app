@@ -21,16 +21,32 @@ export const privadoProofRequestSchema = z.object({
   }),
 });
 
-// ZK Proof response from Privado ID
+// ZK Proof response from Privado ID (with clearer field names)
 export const privadoProofSchema = z.object({
   proof: z.object({
-    pi_a: z.array(z.string()),
-    pi_b: z.array(z.array(z.string())),
-    pi_c: z.array(z.string()),
+    proof_a: z.array(z.string()), // First element of Groth16 proof
+    proof_b: z.array(z.array(z.string())), // Second element of Groth16 proof  
+    proof_c: z.array(z.string()), // Third element of Groth16 proof
     protocol: z.literal('groth16'),
   }),
-  pub_signals: z.array(z.string()),
+  public_signals: z.array(z.string()),
 });
+
+// Structured dealer request (internal storage)
+export const dealerRequestSchema = z.object({
+  buyer_email: z.string().email(),
+  buyer_dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  shipping_address: z.string().min(10),
+  transaction_id: z.string(),
+  ab1263_disclosure_presented: z.boolean(),
+  acknowledgment_received: z.boolean(),
+  ip_address: z.string().ip(),
+  user_agent: z.string(),
+  timestamp: z.string().datetime(),
+});
+
+// Consistent blockchain status enum
+export const blockchainStatusSchema = z.enum(['pending', 'submitted', 'confirmed', 'failed']);
 
 // Compliance event record
 export const complianceEventSchema = z.object({
@@ -39,7 +55,8 @@ export const complianceEventSchema = z.object({
   buyer_id: z.string().uuid(),
   dealer_id: z.string().uuid(),
   
-  dealer_request: z.record(z.any()),
+  // Structured dealer request
+  dealer_request: dealerRequestSchema,
   
   // Privado ID verification results
   privado_proofs: z.object({
@@ -57,7 +74,7 @@ export const complianceEventSchema = z.object({
   }),
   
   // Blockchain integration
-  blockchain_status: z.enum(['pending', 'submitted', 'confirmed', 'failed']),
+  blockchain_status: blockchainStatusSchema,
   polygon_tx_hash: z.string().optional(),
   polygon_block_number: z.number().int().optional(),
   
