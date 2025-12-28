@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { verificationRequestSchema } from '@ca2achain/shared';
+import { verificationRequestSchema, createStandardComplianceRequirements } from '@ca2achain/shared';
 import { 
   getBuyerByEmail, 
   getBuyerSecrets,
@@ -60,8 +60,13 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({ 
           success: false,
           verification_result: 'FAIL',
+          age_verified: false,
+          address_verified: false,
+          confidence_score: 0,
+          timestamp: new Date().toISOString(),
           error: 'Buyer not found',
           message: 'Buyer must register and complete identity verification first',
+          compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
         });
       }
 
@@ -72,8 +77,13 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ 
           success: false,
           verification_result: 'FAIL',
+          age_verified: false,
+          address_verified: false,
+          confidence_score: 0,
+          timestamp: new Date().toISOString(),
           error: 'Buyer not verified',
           verification_status: buyer.verification_status,
+          compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
         });
       }
 
@@ -88,9 +98,14 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ 
           success: false,
           verification_result: 'FAIL',
+          age_verified: false,
+          address_verified: false,
+          confidence_score: 0,
+          timestamp: new Date().toISOString(),
           error: 'Buyer verification expired',
           expired_at: buyer.verification_expires_at,
           message: 'Buyer needs to re-verify with updated ID',
+          compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
         });
       }
 
@@ -102,7 +117,12 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
         return reply.status(404).send({ 
           success: false,
           verification_result: 'FAIL',
+          age_verified: false,
+          address_verified: false,
+          confidence_score: 0,
+          timestamp: new Date().toISOString(),
           error: 'Buyer data not found',
+          compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
         });
       }
 
@@ -127,7 +147,12 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
         return reply.status(500).send({ 
           success: false,
           verification_result: 'FAIL',
+          age_verified: false,
+          address_verified: false,
+          confidence_score: 0,
+          timestamp: new Date().toISOString(),
           error: 'Proof verification failed',
+          compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
         });
       }
 
@@ -151,6 +176,13 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
         addressProof,
         dealer.id,
         verificationData.transaction_id
+      );
+
+      // Generate compliance requirements for dealer
+      const complianceRequirements = createStandardComplianceRequirements(
+        verificationResult,
+        ageVerified,
+        addressVerified
       );
 
       // Store compliance event in database
@@ -183,7 +215,7 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
       // Increment dealer query count
       await incrementDealerQueryCount(dealer.id);
 
-      // Return verification result
+      // Return verification result with compliance requirements
       return reply.send({
         success: true,
         verification_id: verificationId,
@@ -197,10 +229,10 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
           acknowledgment_received: verificationData.acknowledgment_received,
           compliance_version: 'AB1263-2026.1',
         },
-        // Note: No PII is returned - only verification status
+        compliance_requirements: complianceRequirements,
         message: verificationResult === 'PASS' 
-          ? 'Buyer verified for age and address compliance'
-          : 'Buyer verification failed - review requirements',
+          ? 'Buyer verified for age and address compliance - follow mandatory shipping requirements'
+          : 'Buyer verification failed - do not proceed with shipment',
       });
 
     } catch (error) {
@@ -214,7 +246,12 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
       return reply.status(500).send({ 
         success: false,
         verification_result: 'FAIL',
+        age_verified: false,
+        address_verified: false,
+        confidence_score: 0,
+        timestamp: new Date().toISOString(),
         error: 'Internal server error',
+        compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
       });
     }
   });
@@ -286,6 +323,7 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
             address_verified: true,
             confidence_score: 90,
             timestamp: new Date().toISOString(),
+            compliance_requirements: createStandardComplianceRequirements('PASS', true, true),
           });
 
           // Increment query count for each verification
@@ -296,8 +334,12 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
             transaction_id: verification.transaction_id || 'unknown',
             buyer_email: verification.buyer_email,
             verification_result: 'FAIL',
+            age_verified: false,
+            address_verified: false,
+            confidence_score: 0,
             error: 'Verification processing failed',
             timestamp: new Date().toISOString(),
+            compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
           });
           
           // Still count failed verifications against quota
@@ -341,6 +383,7 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
         verification_result: 'PASS',
         timestamp: new Date().toISOString(),
         blockchain_status: 'confirmed',
+        compliance_requirements: createStandardComplianceRequirements('PASS', true, true),
       });
 
     } catch (error) {
