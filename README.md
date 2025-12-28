@@ -4,21 +4,15 @@ Identity-as-a-Service platform for CCPA-compliant age and identity verification.
 
 ## Tech Stack
 
-- **Frontend**: Next.js
-- **Backend**: Fastify, Supabase (Auth + Database)
-- **Identity**: Privado ID (Polygon ID) - Zero-Knowledge Proofs
-- **Services**: Persona (KYC), Stripe (Payments), Resend (Email)
-- **Hosting**: Render
-
-Core Infrastructure
-
-Database: Supabase (Postgres + RLS + Vault encryption)
-Backend: Fastify (Node.js REST API)
-Blockchain: Polygon (immutable audit trail)
-Identity: Privado ID/Polygon ID (zero-knowledge proofs)
-KYC: Persona (driver's license verification)
-Address Normalization: USPS Address API (or SmartyStreets/Melissa Data)
-Payments: Stripe (dealer subscriptions)
+- Database: Supabase (Postgres + RLS + Vault encryption)
+- Backend: Fastify (Node.js REST API)
+- Blockchain: Polygon (immutable audit trail)
+- Identity: Privado ID/Polygon ID (zero-knowledge proofs)
+- KYC: Persona (driver's license verification)
+- Address Normalization: USPS Address API (or SmartyStreets/Melissa Data)
+- Payments: Stripe (dealer subscriptions)
+- Authentication: Resend (One-Time Email)
+- Hosting: Render
 
 ## Setup
 
