@@ -18,35 +18,35 @@ importers:
         specifier: workspace:*
         version: link:../packages/shared
       '@fastify/cors':
-        specifier: ^10.0.1
+        specifier: ^10.1.0
         version: 10.1.0
       '@fastify/helmet':
         specifier: ^12.0.1
         version: 12.0.1
       '@supabase/supabase-js':
-        specifier: ^2.39.3
+        specifier: ^2.89.0
         version: 2.89.0
       dotenv:
-        specifier: ^16.4.1
+        specifier: ^16.6.1
         version: 16.6.1
       fastify:
-        specifier: ^5.2.0
+        specifier: ^5.6.2
         version: 5.6.2
       resend:
-        specifier: ^3.2.0
+        specifier: ^3.5.0
         version: 3.5.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       stripe:
-        specifier: ^14.14.0
+        specifier: ^14.25.0
         version: 14.25.0
     devDependencies:
       '@types/node':
-        specifier: ^20.11.5
+        specifier: ^20.19.27
         version: 20.19.27
       tsx:
-        specifier: ^4.7.0
+        specifier: ^4.21.0
         version: 4.21.0
       typescript:
-        specifier: ^5.3.3
+        specifier: ^5.9.3
         version: 5.9.3
 
   packages/shared:

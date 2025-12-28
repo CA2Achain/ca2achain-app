@@ -7,9 +7,13 @@ export default async function authRoutes(fastify: FastifyInstance) {
   // Send magic link for login/register
   fastify.post('/login', async (request, reply) => {
     try {
+      console.log('🔍 Auth login request body:', request.body);
+      
       const body = authLoginSchema.parse(request.body) as AuthLogin;
+      console.log('🔍 Parsed body:', body);
 
       // Send magic link with account type for new users
+      console.log('🔍 Sending magic link to:', body.email, 'type:', body.account_type);
       await sendMagicLink(body.email, body.account_type);
 
       return reply.send({
@@ -18,7 +22,8 @@ export default async function authRoutes(fastify: FastifyInstance) {
         email: body.email,
       });
     } catch (error) {
-      request.log.error(error);
+      console.error('🔍 Auth login error:', error);
+      request.log.error({ error }, 'Auth login failed');
       return reply.status(400).send({ 
         success: false,
         error: 'Invalid request' 

@@ -1,6 +1,9 @@
 import { FastifyInstance } from 'fastify';
-import { getVerifiedPersonaData, verifyPersonaWebhook } from '../services/persona.js';
-import { verifyWebhookSignature, getSubscriptionDetails } from '../services/stripe.js';
+import { 
+  verifyPersonaWebhook, 
+  getVerifiedPersonaData 
+} from '../services/mocks/persona.js';
+import { verifyWebhookSignature, getSubscriptionDetails } from '../services/service-resolver.js';
 import { 
   getBuyerById, 
   updateBuyerAccount,
@@ -109,7 +112,7 @@ export default async function webhookRoutes(fastify: FastifyInstance) {
       });
 
     } catch (error) {
-      request.log.error('Persona webhook processing failed:', error);
+      request.log.error({ error }, 'Persona webhook processing failed');
       return reply.status(500).send({ error: 'Webhook processing failed' });
     }
   });
@@ -118,7 +121,7 @@ export default async function webhookRoutes(fastify: FastifyInstance) {
   fastify.post('/stripe', async (request, reply) => {
     try {
       const signature = request.headers['stripe-signature'] as string;
-      const payload = request.rawBody as string;
+      const payload = (request as any).rawBody as string;
 
       // Verify webhook signature
       const event = verifyWebhookSignature(
@@ -171,7 +174,7 @@ export default async function webhookRoutes(fastify: FastifyInstance) {
       });
 
     } catch (error) {
-      request.log.error('Stripe webhook processing failed:', error);
+      request.log.error({ error }, 'Stripe webhook processing failed');
       return reply.status(400).send({ error: 'Webhook error' });
     }
   });

@@ -89,7 +89,7 @@ export async function apiKeyMiddleware(
     request.log.info(`API request from dealer: ${dealer.company_name} (${dealer.queries_used_this_month}/${dealer.monthly_query_limit} queries used)`);
 
   } catch (error) {
-    request.log.error('API key middleware error:', error);
+    request.log.error({ error }, 'API key middleware error');
     return reply.status(500).send({ 
       success: false,
       error: 'Internal server error',

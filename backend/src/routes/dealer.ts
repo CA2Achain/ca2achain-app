@@ -12,7 +12,7 @@ import {
   createDealerCustomer, 
   createDealerSubscriptionCheckout,
   verifyDealerSubscription 
-} from '../services/stripe.js';
+} from '../services/service-resolver.js';
 import { 
   sendDealerApiKey, 
   sendDealerSubscriptionConfirmed,
@@ -139,6 +139,10 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
       const subscription = await verifyDealerSubscription(session_id);
       
       // Update dealer subscription status
+      if (!subscription.dealerId) {
+        throw new Error('Subscription verification failed: missing dealer ID');
+      }
+      
       const dealer = await updateDealerAccount(subscription.dealerId, {
         stripe_subscription_id: subscription.subscriptionId,
         subscription_status: subscription.subscriptionStatus as any,

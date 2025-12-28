@@ -59,7 +59,7 @@ export async function authMiddleware(
     };
 
   } catch (error) {
-    request.log.error('Auth middleware error:', error);
+    request.log.error({ error }, 'Auth middleware error');
     return reply.status(401).send({ 
       success: false,
       error: 'Authentication failed' 

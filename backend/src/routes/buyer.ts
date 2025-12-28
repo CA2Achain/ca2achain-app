@@ -8,8 +8,11 @@ import {
   updateBuyerAccount,
   createBuyerSecrets
 } from '../services/supabase.js';
-import { createBuyerCheckoutSession, verifyBuyerPayment } from '../services/stripe.js';
-import { createBuyerInquiry, getVerifiedPersonaData } from '../services/persona.js';
+import { createBuyerCheckoutSession, verifyBuyerPayment } from '../services/service-resolver.js';
+import { 
+  createBuyerInquiry, 
+  getVerifiedPersonaData 
+} from '../services/mocks/persona.js';
 import { issuePrivadoCredential } from '../services/polygonid.js';
 import { encryptPersonaData, encryptPrivadoCredential, generateEncryptionKeyId } from '../services/encryption.js';
 import { sendBuyerVerificationStarted, sendBuyerVerificationComplete, sendDataDeletionConfirmation } from '../services/email.js';
@@ -117,6 +120,10 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
       const payment = await verifyBuyerPayment(session_id);
       
       // Update buyer payment status
+      if (!payment.buyerId) {
+        throw new Error('Payment verification failed: missing buyer ID');
+      }
+      
       const buyer = await updateBuyerAccount(payment.buyerId, {
         payment_status: 'paid',
         stripe_payment_id: payment.paymentIntentId,

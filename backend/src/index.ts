@@ -5,8 +5,9 @@ import dotenv from 'dotenv';
 import { authMiddleware } from './middleware/auth.js';
 import { apiKeyMiddleware } from './middleware/apikey.js';
 import { initSupabase } from './services/supabase.js';
-import { initStripe } from './services/stripe.js';
+import { initStripe } from './services/service-resolver.js';
 import { initResend } from './services/email.js';
+import { logServiceStatus } from './services/service-resolver.js';
 
 import authRoutes from './routes/auth.js';
 import buyerRoutes from './routes/buyer.js';
@@ -16,14 +17,21 @@ import webhookRoutes from './routes/webhooks.js';
 
 dotenv.config();
 
+// Check which services have API keys available
+const hasStripeKey = !!process.env.STRIPE_SECRET_KEY;
+const hasPersonaKey = !!process.env.PERSONA_API_KEY;
+
 const fastify = Fastify({
   logger: true,
 });
 
-// Initialize services
+// Initialize services (automatically uses mocks when API keys missing)
 initSupabase();
 initStripe();
 initResend();
+
+// Log which services are real vs mocked
+logServiceStatus();
 
 // Security middleware
 await fastify.register(helmet);
@@ -39,19 +47,36 @@ fastify.addContentTypeParser('application/json', { parseAs: 'string' }, fastify.
 fastify.decorate('authenticate', authMiddleware);
 fastify.decorate('authenticateApiKey', apiKeyMiddleware);
 
-// Health check
+// Health check with service status
 fastify.get('/health', async () => {
+  const serviceStatus = {
+    stripe: hasStripeKey ? 'REAL' : 'MOCK',
+    persona: hasPersonaKey ? 'REAL' : 'MOCK', 
+    supabase: !!process.env.SUPABASE_SERVICE_ROLE_KEY ? 'REAL' : 'MISSING',
+    resend: !!process.env.RESEND_API_KEY ? 'REAL' : 'MISSING',
+    encryption: !!process.env.ENCRYPTION_KEY ? 'REAL' : 'MISSING',
+  };
+  
   return { 
     status: 'ok', 
     service: 'CA2AChain API',
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
+    services: serviceStatus,
   };
 });
 
 // API documentation endpoint
 fastify.get('/api', async () => {
+  const services = {
+    stripe: hasStripeKey ? 'REAL' : 'MOCK',
+    persona: hasPersonaKey ? 'REAL' : 'MOCK',
+    supabase: !!process.env.SUPABASE_SERVICE_ROLE_KEY ? 'REAL' : 'MISSING',
+    resend: !!process.env.RESEND_API_KEY ? 'REAL' : 'MISSING',
+    encryption: !!process.env.ENCRYPTION_KEY ? 'REAL' : 'MISSING',
+  };
+  
   return {
     name: 'CA2AChain API',
     description: 'AB 1263 Compliance API for firearm accessory dealers',
@@ -71,6 +96,10 @@ fastify.get('/api', async () => {
       'Privado ID integration',
       'Stripe payment processing',
     ],
+    services: services,
+    mocked_services: Object.entries(services)
+      .filter(([_, status]) => status === 'MOCK')
+      .map(([service, _]) => service),
   };
 });
 
