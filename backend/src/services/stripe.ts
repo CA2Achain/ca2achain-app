@@ -214,6 +214,116 @@ export const getCustomerDetails = async (customerId: string) => {
 };
 
 // =============================================
+// SUBSCRIPTION MANAGEMENT FUNCTIONS
+// =============================================
+
+export const getDealerSubscriptionDetails = async (subscriptionId: string) => {
+  await mockDelay();
+  
+  const subscription = mockSubscriptions.get(subscriptionId);
+  if (!subscription) {
+    throw new Error('Mock subscription not found');
+  }
+  
+  console.log(`🧪 Mock Stripe: Retrieved subscription details for ${subscriptionId}`);
+  return subscription;
+};
+
+export const cancelDealerSubscription = async (subscriptionId: string) => {
+  await mockDelay();
+  
+  const subscription = mockSubscriptions.get(subscriptionId);
+  if (!subscription) {
+    throw new Error('Mock subscription not found');
+  }
+  
+  // Update subscription status to cancelled
+  subscription.status = 'canceled';
+  subscription.canceledAt = new Date();
+  subscription.cancelAtPeriodEnd = true;
+  
+  mockSubscriptions.set(subscriptionId, subscription);
+  
+  console.log(`🧪 Mock Stripe: Cancelled subscription ${subscriptionId}`);
+  return subscription;
+};
+
+export const updateDealerSubscriptionPlan = async (
+  subscriptionId: string, 
+  newPlan: 'tier1' | 'tier2' | 'tier3'
+) => {
+  await mockDelay();
+  
+  const subscription = mockSubscriptions.get(subscriptionId);
+  if (!subscription) {
+    throw new Error('Mock subscription not found');
+  }
+  
+  const planLimits = {
+    tier1: 50,    // Starter: $199/month for 50 verifications
+    tier2: 350,   // Business: $999/month for 350 verifications  
+    tier3: 3000   // Enterprise: $3799/month for 3000 verifications
+  };
+  
+  const planPrices = {
+    tier1: 19900,  // $199.00 in cents
+    tier2: 99900,  // $999.00 in cents
+    tier3: 379900  // $3799.00 in cents
+  };
+  
+  // Update subscription details
+  subscription.planTier = newPlan;
+  subscription.monthlyQueryLimit = planLimits[newPlan];
+  subscription.amount = planPrices[newPlan];
+  subscription.updatedAt = new Date();
+  
+  mockSubscriptions.set(subscriptionId, subscription);
+  
+  console.log(`🧪 Mock Stripe: Updated subscription ${subscriptionId} to plan ${newPlan}`);
+  return subscription;
+};
+
+export const resumeDealerSubscription = async (subscriptionId: string) => {
+  await mockDelay();
+  
+  const subscription = mockSubscriptions.get(subscriptionId);
+  if (!subscription) {
+    throw new Error('Mock subscription not found');
+  }
+  
+  // Resume cancelled subscription
+  subscription.status = 'active';
+  subscription.canceledAt = null;
+  subscription.cancelAtPeriodEnd = false;
+  
+  mockSubscriptions.set(subscriptionId, subscription);
+  
+  console.log(`🧪 Mock Stripe: Resumed subscription ${subscriptionId}`);
+  return subscription;
+};
+
+export const updateDealerBillingInfo = async (customerId: string, billingData: any) => {
+  await mockDelay();
+  
+  const customer = mockCustomers.get(customerId);
+  if (!customer) {
+    throw new Error('Mock customer not found');
+  }
+  
+  // Update customer billing information
+  customer.billingDetails = {
+    ...customer.billingDetails,
+    ...billingData,
+    updatedAt: new Date().toISOString()
+  };
+  
+  mockCustomers.set(customerId, customer);
+  
+  console.log(`🧪 Mock Stripe: Updated billing info for customer ${customerId}`);
+  return customer;
+};
+
+// =============================================
 // INITIALIZATION
 // =============================================
 

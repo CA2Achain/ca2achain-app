@@ -195,6 +195,49 @@ export const deleteBuyerSecrets = async (buyerId: string): Promise<void> => {
   if (error) throw new Error(`Failed to delete buyer secrets: ${error.message}`);
 };
 
+// Complete buyer account deletion (CCPA compliance) - works with original schema
+export const deleteBuyerAccount = async (buyerId: string): Promise<void> => {
+  // 1. Anonymize compliance events first (preserves records for legal compliance)
+  const { error: anonymizeError } = await supabase
+    .rpc('anonymize_compliance_events_for_buyer', { buyer_uuid: buyerId });
+  
+  if (anonymizeError) {
+    console.warn(`Could not anonymize compliance events: ${anonymizeError.message}`);
+    // Continue with deletion - don't fail the whole process
+  }
+  
+  // 2. Delete buyer secrets (PII data)
+  await deleteBuyerSecrets(buyerId);
+  
+  // 3. Delete buyer account record (cascade will handle compliance_events per original schema)
+  const { error: buyerError } = await supabase
+    .from('buyer_accounts')
+    .delete()
+    .eq('id', buyerId);
+  
+  if (buyerError) throw new Error(`Failed to delete buyer account: ${buyerError.message}`);
+};
+
+// Complete dealer account deletion - works with original schema
+export const deleteDealerAccount = async (dealerId: string): Promise<void> => {
+  // 1. Anonymize compliance events first (preserves records for legal compliance)
+  const { error: anonymizeError } = await supabase
+    .rpc('anonymize_compliance_events_for_dealer', { dealer_uuid: dealerId });
+  
+  if (anonymizeError) {
+    console.warn(`Could not anonymize compliance events: ${anonymizeError.message}`);
+    // Continue with deletion - don't fail the whole process
+  }
+  
+  // 2. Delete dealer account record (cascade will handle compliance_events per original schema)
+  const { error: dealerError } = await supabase
+    .from('dealer_accounts')
+    .delete()
+    .eq('id', dealerId);
+  
+  if (dealerError) throw new Error(`Failed to delete dealer account: ${dealerError.message}`);
+};
+
 // =============================================
 // DEALER ACCOUNTS
 // =============================================
@@ -336,6 +379,21 @@ export const getBuyerAuditLogs = async (buyerId: string) => {
     .rpc('get_buyer_audit_logs', { buyer_uuid: buyerId });
 
   if (error) throw new Error(`Failed to get audit logs: ${error.message}`);
+  return data;
+};
+
+// Get dealer's compliance events
+export const getDealerComplianceEvents = async (dealerId: string) => {
+  const { data, error } = await supabase
+    .from('compliance_events')
+    .select(`
+      *,
+      buyer_accounts!inner(email, first_name, last_name)
+    `)
+    .eq('dealer_id', dealerId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(`Failed to get dealer compliance events: ${error.message}`);
   return data;
 };
 

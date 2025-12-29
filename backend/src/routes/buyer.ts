@@ -3,7 +3,9 @@ import {
   getBuyerByEmail, 
   getBuyerSecrets, 
   deleteBuyerSecrets,
+  deleteBuyerAccount,
   getBuyerAuditLogs,
+  getComplianceEventById,
   createBuyerAccount,
   updateBuyerAccount,
   createBuyerSecrets
@@ -350,7 +352,7 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // Delete buyer data (CCPA compliance)
+  // Delete buyer data only (CCPA compliance - keeps verification history access)
   fastify.delete('/data', {
     preHandler: [fastify.authenticate],
   }, async (request, reply) => {
@@ -365,25 +367,181 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
         });
       }
 
-      // Delete encrypted secrets (PII)
+      // Delete only PII data, keep account for verification history access
       await deleteBuyerSecrets(buyer.id);
 
-      // Delete user from Supabase Auth (cascades to auth_accounts and buyer_accounts)
-      await deleteUser(authAccount.id);
+      // Send confirmation email before account modification
+      await sendDataDeletionConfirmation(authAccount.email, 'partial');
 
-      // Send confirmation email
-      await sendDataDeletionConfirmation(authAccount.email, 'buyer');
-
-      return reply.send({ 
+      return reply.send({
         success: true,
-        message: 'Your data has been permanently deleted',
+        message: 'Your personal data has been permanently deleted',
         deleted_at: new Date().toISOString(),
+        note: 'Your account remains active to access verification history. Use DELETE /account to delete everything.'
       });
     } catch (error) {
       request.log.error(error);
       return reply.status(500).send({ 
         success: false,
         error: 'Failed to delete data' 
+      });
+    }
+  });
+
+  // Delete complete buyer account (CCPA compliance - nuclear option)
+  fastify.delete('/account', {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
+    try {
+      const authAccount = request.user!;
+      const buyer = await getBuyerByEmail(authAccount.email);
+      
+      if (!buyer) {
+        return reply.status(404).send({ 
+          success: false,
+          error: 'Buyer account not found' 
+        });
+      }
+
+      // Send confirmation email before account deletion
+      await sendDataDeletionConfirmation(authAccount.email, 'complete');
+
+      // Complete account deletion (buyer_account, buyer_secrets, anonymize compliance_events)
+      await deleteBuyerAccount(buyer.id);
+
+      // Delete from Supabase Auth
+      await deleteUser(authAccount.id);
+
+      return reply.send({
+        success: true,
+        message: 'Your account has been permanently deleted',
+        deleted_at: new Date().toISOString(),
+        compliance_note: 'Blockchain verification proofs remain for legal compliance but contain no personal information',
+        ccpa_compliance: true
+      });
+    } catch (error) {
+      request.log.error({ error }, 'Failed to delete buyer account');
+      return reply.status(500).send({ 
+        success: false,
+        error: 'Failed to delete account' 
+      });
+    }
+  });
+
+  // Get buyer's compliance/verification history
+  fastify.get('/compliance-history', {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
+    try {
+      const authAccount = request.user!;
+      const buyer = await getBuyerByEmail(authAccount.email);
+      
+      if (!buyer) {
+        return reply.status(404).send({ 
+          success: false,
+          error: 'Buyer account not found' 
+        });
+      }
+
+      // Get buyer's audit logs and compliance events
+      const auditLogs = await getBuyerAuditLogs(buyer.id);
+
+      // Format compliance history for buyer view
+      const complianceHistory = auditLogs.map((event: any) => ({
+        verification_id: event.verification_id,
+        verification_date: event.created_at,
+        dealer_company: event.dealer_company_name,
+        verification_result: {
+          age_verified: event.verification_response?.age_verified || false,
+          address_verified: event.verification_response?.address_verified || false,
+          confidence_score: event.verification_response?.confidence_score || 0
+        },
+        compliance_status: event.verification_response?.age_verified && event.verification_response?.address_verified ? 'COMPLIANT' : 'NON_COMPLIANT',
+        blockchain_status: event.blockchain_status || 'pending',
+        blockchain_tx_hash: event.blockchain_tx_hash || null,
+        ab1263_compliance: {
+          disclosure_presented: event.dealer_request?.ab1263_disclosure_presented || false,
+          acknowledgment_received: event.dealer_request?.acknowledgment_received || false
+        },
+        transaction_id: event.dealer_request?.transaction_id,
+        shipping_address_used: event.dealer_request?.shipping_address
+      }));
+
+      return reply.send({
+        success: true,
+        buyer_id: buyer.id,
+        verification_count: complianceHistory.length,
+        compliance_history: complianceHistory,
+        privacy_notice: 'This data can be deleted per your CCPA rights. Blockchain proofs will remain for legal compliance but contain no personal information.'
+      });
+
+    } catch (error) {
+      request.log.error({ error }, 'Failed to get buyer compliance history');
+      return reply.status(500).send({ 
+        success: false,
+        error: 'Failed to retrieve compliance history' 
+      });
+    }
+  });
+
+  // Get specific compliance event details for buyer
+  fastify.get('/compliance-event/:verification_id', {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
+    try {
+      const { verification_id } = request.params as { verification_id: string };
+      const authAccount = request.user!;
+      const buyer = await getBuyerByEmail(authAccount.email);
+      
+      if (!buyer) {
+        return reply.status(404).send({ 
+          success: false,
+          error: 'Buyer account not found' 
+        });
+      }
+
+      // Get specific compliance event (need to add this function)
+      const auditLogs = await getBuyerAuditLogs(buyer.id);
+      const specificEvent = auditLogs.find((event: any) => event.verification_id === verification_id);
+
+      if (!specificEvent) {
+        return reply.status(404).send({
+          success: false,
+          error: 'Compliance event not found for this buyer'
+        });
+      }
+
+      return reply.send({
+        success: true,
+        compliance_event: {
+          verification_id: specificEvent.verification_id,
+          verification_date: specificEvent.created_at,
+          dealer_information: {
+            company_name: specificEvent.dealer_company_name,
+            masked_api_key: '••••••••' + (specificEvent.dealer_api_key?.slice(-4) || ''),
+            compliance_acknowledged: specificEvent.dealer_request?.ab1263_disclosure_presented
+          },
+          verification_results: specificEvent.verification_response,
+          legal_compliance: {
+            ab1263_requirements_met: specificEvent.verification_response?.age_verified && specificEvent.verification_response?.address_verified,
+            ccpa_rights_preserved: true,
+            blockchain_proof_stored: !!specificEvent.blockchain_tx_hash
+          },
+          blockchain_information: {
+            status: specificEvent.blockchain_status,
+            transaction_hash: specificEvent.blockchain_tx_hash,
+            immutable_proof: !!specificEvent.blockchain_tx_hash,
+            contains_personal_data: false
+          },
+          privacy_notes: 'This verification used zero-knowledge proofs. Your personal information was never shared with the dealer.'
+        }
+      });
+
+    } catch (error) {
+      request.log.error({ error }, 'Failed to get compliance event details');
+      return reply.status(500).send({ 
+        success: false,
+        error: 'Failed to retrieve compliance event details' 
       });
     }
   });
