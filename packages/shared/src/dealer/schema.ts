@@ -1,10 +1,11 @@
 import { z } from 'zod';
+import { addressStringSchema } from '../common/schema.js';
 
 // Dealer registration schema (for initial account creation)
 export const dealerRegistrationSchema = z.object({
   company_name: z.string().min(2),
   business_email: z.string().email(),
-  business_address: z.string().min(10, 'Complete business address required'),
+  business_address: addressStringSchema, // Use common address schema
   business_phone: z.string().min(10, 'Valid business phone required'),
   business_ein: z.string().optional(), // Tax ID, not personal
 });
@@ -15,7 +16,7 @@ export const dealerAccountSchema = z.object({
   auth_id: z.string().uuid(),
   company_name: z.string(),
   business_email: z.string(), // company@business.com format required
-  business_address: z.string().optional(),
+  business_address: addressStringSchema.optional(), // Use common address schema
   business_phone: z.string().optional(),
   business_ein: z.string().optional(), // Tax ID, not personal
   
@@ -47,7 +48,7 @@ export const dealerSubscriptionSchema = z.object({
 export const dealerProfileUpdateSchema = z.object({
   company_name: z.string().min(1).optional(),
   business_email: z.string().email().optional(),
-  business_address: z.string().min(10).optional(),
+  business_address: addressStringSchema.optional(), // Use common address schema
   business_phone: z.string().min(10).optional(),
   business_ein: z.string().optional(),
 });
