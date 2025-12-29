@@ -206,10 +206,21 @@ export const deleteBuyerAccount = async (buyerId: string): Promise<void> => {
     // Continue with deletion - don't fail the whole process
   }
   
-  // 2. Delete buyer secrets (PII data)
+  // 2. Anonymize payment records - set account_id to NULL (preserves customer_reference_id for accounting)
+  const { error: paymentError } = await supabase
+    .from('payments')
+    .update({ account_id: null })
+    .eq('account_id', buyerId);
+  
+  if (paymentError) {
+    console.warn(`Could not anonymize payment records: ${paymentError.message}`);
+    // Continue with deletion - don't fail the whole process
+  }
+  
+  // 3. Delete buyer secrets (PII data)
   await deleteBuyerSecrets(buyerId);
   
-  // 3. Delete buyer account record (cascade will handle compliance_events per original schema)
+  // 4. Delete buyer account record (cascade will handle compliance_events per original schema)
   const { error: buyerError } = await supabase
     .from('buyer_accounts')
     .delete()
@@ -229,7 +240,18 @@ export const deleteDealerAccount = async (dealerId: string): Promise<void> => {
     // Continue with deletion - don't fail the whole process
   }
   
-  // 2. Delete dealer account record (cascade will handle compliance_events per original schema)
+  // 2. Anonymize payment records - set account_id to NULL (preserves customer_reference_id for accounting)
+  const { error: paymentError } = await supabase
+    .from('payments')
+    .update({ account_id: null })
+    .eq('account_id', dealerId);
+  
+  if (paymentError) {
+    console.warn(`Could not anonymize payment records: ${paymentError.message}`);
+    // Continue with deletion - don't fail the whole process
+  }
+  
+  // 3. Delete dealer account record (cascade will handle compliance_events per original schema)
   const { error: dealerError } = await supabase
     .from('dealer_accounts')
     .delete()
@@ -394,6 +416,217 @@ export const getDealerComplianceEvents = async (dealerId: string) => {
     .order('created_at', { ascending: false });
 
   if (error) throw new Error(`Failed to get dealer compliance events: ${error.message}`);
+  return data;
+};
+
+// =============================================
+// PAYMENTS WITH IMMUTABLE CUSTOMER REFERENCE
+// =============================================
+
+// Generate customer reference ID
+const generateCustomerReference = (accountId: string, accountType: 'buyer' | 'dealer'): string => {
+  const hash = require('crypto').createHash('md5').update(accountId).digest('hex').substring(0, 8);
+  const prefix = accountType === 'buyer' ? 'BUY_' : 'DLR_';
+  return prefix + hash;
+};
+
+// Create payment
+export const createPayment = async (data: {
+  stripe_payment_intent_id: string;
+  account_id: string;
+  account_type: 'buyer' | 'dealer';
+  transaction_type: 'verification' | 'subscription';
+  amount_cents: number;
+  payment_timestamp: string;
+  status: 'pending' | 'succeeded' | 'failed' | 'refunded';
+}) => {
+  const paymentData = {
+    stripe_payment_intent_id: data.stripe_payment_intent_id,
+    account_id: data.account_id,
+    customer_reference_id: generateCustomerReference(data.account_id, data.account_type),
+    transaction_type: data.transaction_type,
+    amount_cents: data.amount_cents,
+    payment_timestamp: data.payment_timestamp,
+    status: data.status
+  };
+
+  const { data: payment, error } = await supabase
+    .from('payments')
+    .insert(paymentData)
+    .select()
+    .single();
+
+  if (error) throw new Error(`Failed to create payment: ${error.message}`);
+  return payment;
+};
+
+// Update payment status (for webhooks)
+export const updatePaymentStatus = async (
+  stripePaymentIntentId: string,
+  updates: {
+    status?: 'pending' | 'succeeded' | 'failed' | 'refunded';
+    payment_timestamp?: string;
+  }
+) => {
+  const { data, error } = await supabase
+    .from('payments')
+    .update(updates)
+    .eq('stripe_payment_intent_id', stripePaymentIntentId)
+    .select()
+    .single();
+
+  if (error) throw new Error(`Failed to update payment: ${error.message}`);
+  return data;
+};
+
+// Get user payments (by live account_id)
+export const getUserPayments = async (accountId: string) => {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('account_id', accountId)
+    .order('payment_timestamp', { ascending: false });
+
+  if (error) throw new Error(`Failed to get user payments: ${error.message}`);
+  return data;
+};
+
+// Get payments by customer reference (survives account deletion)
+export const getPaymentsByCustomerReference = async (customerReferenceId: string) => {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('customer_reference_id', customerReferenceId)
+    .order('payment_timestamp', { ascending: false });
+
+  if (error) throw new Error(`Failed to get payments by customer reference: ${error.message}`);
+  return data;
+};
+
+// Get all payments by transaction type
+export const getPaymentsByTransactionType = async (transactionType: 'verification' | 'subscription') => {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('transaction_type', transactionType)
+    .order('payment_timestamp', { ascending: false });
+
+  if (error) throw new Error(`Failed to get payments by transaction type: ${error.message}`);
+  return data;
+};
+
+// Get customer reference for account (for lookups after deletion)
+export const getCustomerReferenceForAccount = (accountId: string, accountType: 'buyer' | 'dealer'): string => {
+  return generateCustomerReference(accountId, accountType);
+};
+
+// =============================================
+// UNIFIED PAYMENTS SYSTEM
+// =============================================
+
+// Payment interface for TypeScript
+interface PaymentData {
+  stripe_payment_intent_id: string;
+  amount_cents: number;
+  currency?: string;
+  payment_status: 'pending' | 'succeeded' | 'failed' | 'refunded' | 'disputed' | 'canceled';
+  payment_type: 'buyer_verification' | 'dealer_subscription';
+  buyer_id?: string;
+  dealer_id?: string;
+  verification_session_id?: string;
+  buyer_email?: string;
+  stripe_subscription_id?: string;
+  subscription_plan?: 'tier1' | 'tier2' | 'tier3';
+  billing_period_start?: string;
+  billing_period_end?: string;
+  dealer_company_name?: string;
+  stripe_customer_id: string;
+  stripe_charge_id?: string;
+  payment_method_type?: string;
+  receipt_url?: string;
+  failure_reason?: string;
+  tax_amount_cents?: number;
+  fee_amount_cents?: number;
+  net_amount_cents?: number;
+}
+
+// Create payment record
+export const createPayment = async (data: PaymentData) => {
+  const { data: payment, error } = await supabase
+    .from('payments')
+    .insert(data)
+    .select()
+    .single();
+
+  if (error) throw new Error(`Failed to create payment record: ${error.message}`);
+  return payment;
+};
+
+// Update payment status (for webhook processing)
+export const updatePaymentStatus = async (
+  stripePaymentIntentId: string, 
+  updates: Partial<PaymentData>
+) => {
+  const { data, error } = await supabase
+    .from('payments')
+    .update(updates)
+    .eq('stripe_payment_intent_id', stripePaymentIntentId)
+    .select()
+    .single();
+
+  if (error) throw new Error(`Failed to update payment status: ${error.message}`);
+  return data;
+};
+
+// Get payment by Stripe payment intent
+export const getPaymentByStripeIntentId = async (stripePaymentIntentId: string) => {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('stripe_payment_intent_id', stripePaymentIntentId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    throw new Error(`Failed to get payment: ${error.message}`);
+  }
+  return data;
+};
+
+// Get buyer's payment history
+export const getBuyerPayments = async (buyerId: string) => {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('buyer_id', buyerId)
+    .eq('payment_type', 'buyer_verification')
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(`Failed to get buyer payments: ${error.message}`);
+  return data;
+};
+
+// Get dealer's payment history
+export const getDealerPayments = async (dealerId: string) => {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('dealer_id', dealerId)
+    .eq('payment_type', 'dealer_subscription')
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(`Failed to get dealer payments: ${error.message}`);
+  return data;
+};
+
+// Get revenue metrics (for admin dashboard)
+export const getRevenueMetrics = async (startDate?: string, endDate?: string) => {
+  const { data, error } = await supabase
+    .rpc('get_revenue_metrics', {
+      start_date: startDate || null,
+      end_date: endDate || null
+    });
+
+  if (error) throw new Error(`Failed to get revenue metrics: ${error.message}`);
   return data;
 };
 
