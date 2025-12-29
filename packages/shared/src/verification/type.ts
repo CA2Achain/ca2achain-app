@@ -49,9 +49,9 @@ export interface AgeCommitment {
 export interface AddressMatchCommitment {
   zkp_address_proof: string; // Privado proof JSON
   buyer_reference: string; // 'BUY_a8b9c2d1'
-  normalized_buyer_address: string; // Uses normalized address format
+  normalized_buyer_address: string; // Normalized address for hash comparison
   dealer_reference: string; // 'DLR_f3e4d5c6'
-  normalized_shipping_address: string; // Uses normalized address format
+  normalized_shipping_address: string; // Normalized address for hash comparison
   match_confidence: number; // 0.0 to 1.0
   address_match_verified: boolean;
   verified_at_timestamp: string; // ISO timestamp

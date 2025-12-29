@@ -2,17 +2,41 @@ import { z } from 'zod';
 import { addressStringSchema } from '../common/schema.js';
 
 // =============================================
-// DEALER API REQUEST SCHEMAS
+// DEALER API SCHEMAS
 // =============================================
 
 // Dealer verification request to our API
 export const verificationRequestSchema = z.object({
   buyer_email: z.string().email(),
   shipping_address: addressStringSchema, // Use common address schema
-  dealer_order_id: z.string().min(1, 'Order ID required for audit trail'),
   ab1263_compliance_completed: z.boolean().refine(val => val === true, {
     message: 'AB 1263 compliance must be completed before API request'
   }),
+});
+
+// Enhanced verification response to dealer
+export const verificationResponseSchema = z.object({
+  // Echo back dealer's request data
+  buyer_email: z.string().email(), // Same email dealer provided
+  
+  // Verification results (clear boolean outcomes)
+  age_verified: z.boolean(), // Age verification met (18+)
+  address_verified: z.boolean(), // Address match verification met
+  address_match_confidence: z.number().min(0).max(1), // Match confidence score
+  normalized_address_used: z.string(), // Normalized address used in verification
+  
+  // Timestamps and tracking
+  verified_at: z.string().datetime(), // When verification was performed
+  compliance_event_id: z.string().uuid(), // Our internal tracking ID
+  
+  // Optional message for errors/details
+  message: z.string().optional(),
+  
+  // ZKP Proofs - Include for transparency and audit purposes
+  zkp_proofs: z.object({
+    age_proof_hash: z.string(), // Hash of ZKP age proof (not full proof)
+    address_proof_hash: z.string(), // Hash of ZKP address proof (not full proof) 
+  }).optional(),
 });
 
 // =============================================
@@ -124,18 +148,8 @@ export const verificationDataSchema = z.object({
 });
 
 // =============================================
-// API RESPONSE SCHEMAS
+// CCPA COMPLIANCE SCHEMAS  
 // =============================================
-
-// Verification response to dealer
-export const verificationResponseSchema = z.object({
-  success: z.boolean(),
-  compliance_event_id: z.string().uuid(),
-  age_verified: z.boolean(),
-  address_verified: z.boolean(),
-  verification_status: z.enum(['approved', 'denied']),
-  message: z.string().optional(),
-});
 
 // CCPA compliance history request
 export const complianceHistoryRequestSchema = z.object({
