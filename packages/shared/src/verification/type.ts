@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { AddressString, NormalizedAddress } from '../common/type.js';
 import {
   verificationRequestSchema,
   privadoAgeProofSchema,
