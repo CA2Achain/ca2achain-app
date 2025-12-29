@@ -5,6 +5,7 @@ import {
   getBuyerSecrets,
   getDealerByApiKeyHash,
   createComplianceEvent,
+  updateComplianceEventBlockchain,
   incrementDealerQueryCount
 } from '../services/supabase.js';
 import { decryptPersonaData, decryptPrivadoCredential, hashApiKey } from '../services/encryption.js';
@@ -13,6 +14,9 @@ import {
   generateAddressProof, 
   verifyZKProof,
   createComplianceRecord,
+  storeComplianceRecordOnChain,
+  extractAgeVerificationResult,
+  extractAddressVerificationResult,
   deserializeCredential 
 } from '../services/polygonid.js';
 
@@ -156,9 +160,12 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
         });
       }
 
-      // Extract verification results from proofs
-      const ageVerified = ageProof.public_signals[0] === '1'; // 1 = over 18, 0 = under 18
-      const addressVerified = addressProof.public_signals[0] === '1'; // 1 = match, 0 = no match
+      // Extract verification results from proofs using clean boolean helpers
+      const ageResult = extractAgeVerificationResult(ageProof);
+      const addressResult = extractAddressVerificationResult(addressProof);
+      
+      const ageVerified = ageResult.isOver18;
+      const addressVerified = addressResult.addressMatches;
 
       // Calculate overall verification result
       const verificationResult = ageVerified && addressVerified ? 'PASS' : 'FAIL';
@@ -186,7 +193,7 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
       );
 
       // Store compliance event in database
-      await createComplianceEvent({
+      const complianceEvent = await createComplianceEvent({
         verification_id: verificationId,
         buyer_id: buyer.id,
         dealer_id: dealer.id,
@@ -198,19 +205,46 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
           ab1263_disclosure_presented: verificationData.ab1263_disclosure_presented,
           acknowledgment_received: verificationData.acknowledgment_received,
           timestamp: new Date().toISOString(),
-          dealer_ip: request.ip,
         },
-        privado_proofs: {
-          age_verification: ageProof,
-          address_verification: addressProof,
+        verification_response: {
+          age_verified: ageVerified,
+          address_verified: addressVerified,
+          confidence_score: confidenceScore,
+          compliance_requirements: complianceRequirements,
         },
-        compliance_attestation: complianceRecord,
-        blockchain_status: 'pending', // Will be updated by blockchain service
-        verification_result: verificationResult,
-        age_verified: ageVerified,
-        address_verified: addressVerified,
-        confidence_score: confidenceScore,
+        zkp_proofs: {
+          age_verification: {
+            proof: ageProof.proof,
+            public_signals: ageProof.public_signals,
+          },
+          address_verification: {
+            proof: addressProof.proof,
+            public_signals: addressProof.public_signals,
+          },
+        },
+        blockchain_status: 'pending',
       });
+
+      // 🛡️ CRITICAL: Store immutable record on Polygon blockchain
+      try {
+        const blockchainTx = await storeComplianceRecordOnChain(complianceRecord);
+        
+        // Update database with blockchain transaction hash
+        await updateComplianceEventBlockchain(verificationId, {
+          blockchain_tx_hash: blockchainTx.hash,
+          blockchain_status: 'confirmed',
+          blockchain_timestamp: new Date().toISOString(),
+        });
+        
+        console.log(`🔗 Compliance record stored on blockchain: ${blockchainTx.hash}`);
+      } catch (blockchainError) {
+        console.error('⚠️ Blockchain storage failed:', blockchainError);
+        // Still allow verification to proceed, but log the issue
+        await updateComplianceEventBlockchain(verificationId, {
+          blockchain_status: 'failed',
+          blockchain_error: blockchainError.message,
+        });
+      }
 
       // Increment dealer query count
       await incrementDealerQueryCount(dealer.id);

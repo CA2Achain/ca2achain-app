@@ -350,3 +350,24 @@ export const updateComplianceEvent = async (id: string, updates: Partial<Complia
   if (error) throw new Error(`Failed to update compliance event: ${error.message}`);
   return data;
 };
+
+// Update compliance event with blockchain transaction data
+export const updateComplianceEventBlockchain = async (
+  verificationId: string, 
+  blockchainData: {
+    blockchain_tx_hash?: string;
+    blockchain_status: 'pending' | 'confirmed' | 'failed';
+    blockchain_timestamp?: string;
+    blockchain_error?: string;
+  }
+): Promise<ComplianceEvent> => {
+  const { data, error } = await supabase
+    .from('compliance_events')
+    .update(blockchainData)
+    .eq('verification_id', verificationId)
+    .select()
+    .single();
+
+  if (error) throw new Error(`Failed to update compliance event blockchain data: ${error.message}`);
+  return data;
+};

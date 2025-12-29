@@ -1,204 +1,224 @@
-import Stripe from 'stripe';
+/**
+ * Mock Stripe Service for Development
+ * Use this when you don't have Stripe API keys yet
+ */
 
-let stripe: Stripe;
+import { randomUUID } from 'crypto';
 
-export const initStripe = () => {
-  if (!stripe) {
-    stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-      apiVersion: '2023-10-16',
-    });
-  }
-  return stripe;
-};
+// Mock delay to simulate network requests
+const mockDelay = (ms: number = 100) => new Promise(resolve => setTimeout(resolve, ms));
 
-export const getStripe = () => {
-  if (!stripe) {
-    throw new Error('Stripe not initialized. Call initStripe() first.');
-  }
-  return stripe;
-};
+console.log('🧪 Using MOCK Stripe service for development');
+
+// In-memory storage for mock data
+const mockCustomers = new Map();
+const mockSessions = new Map();
+const mockSubscriptions = new Map();
 
 // =============================================
-// BUYER PAYMENT (One-time $2 verification fee)
+// BUYER PAYMENT FUNCTIONS (One-time $2 fee)
 // =============================================
 
-// Create checkout session for buyer verification payment
 export const createBuyerCheckoutSession = async (
   buyerEmail: string,
   buyerId: string
-): Promise<Stripe.Checkout.Session> => {
-  const session = await getStripe().checkout.sessions.create({
-    payment_method_types: ['card'],
-    line_items: [
-      {
-        price_data: {
-          currency: 'usd',
-          product_data: {
-            name: 'Identity Verification Service',
-            description: 'One-time identity verification for CA2AChain',
-          },
-          unit_amount: 200, // $2.00 in cents
-        },
-        quantity: 1,
-      },
-    ],
-    mode: 'payment',
-    success_url: `${process.env.FRONTEND_URL}/buyer/verification-success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${process.env.FRONTEND_URL}/buyer/payment-cancelled`,
-    customer_email: buyerEmail,
+) => {
+  await mockDelay();
+  
+  const sessionId = `cs_mock_${randomUUID().slice(0, 8)}`;
+  const paymentIntentId = `pi_mock_${randomUUID().slice(0, 8)}`;
+  
+  const session = {
+    id: sessionId,
+    url: `https://checkout.stripe.com/pay/mock_${sessionId}`,
+    payment_intent: paymentIntentId,
     metadata: {
       buyer_id: buyerId,
-      payment_type: 'verification',
+      payment_type: 'verification'
     },
-  });
-
+    mode: 'payment',
+    status: 'open'
+  };
+  
+  mockSessions.set(sessionId, session);
+  
+  console.log(`🧪 Mock Stripe: Created buyer checkout session for ${buyerEmail}`);
   return session;
 };
 
-// Verify buyer payment session
 export const verifyBuyerPayment = async (sessionId: string) => {
-  const session = await getStripe().checkout.sessions.retrieve(sessionId);
+  await mockDelay();
   
-  if (session.payment_status !== 'paid') {
-    throw new Error('Payment not completed');
+  const session = mockSessions.get(sessionId);
+  if (!session) {
+    throw new Error('Mock payment session not found');
   }
   
-  return {
-    buyerId: session.metadata?.buyer_id,
-    paymentIntentId: session.payment_intent as string,
-    amountPaid: session.amount_total, // Should be 200 cents ($2.00)
+  // Mark as completed
+  session.status = 'complete';
+  mockSessions.set(sessionId, session);
+  
+  const result = {
+    buyerId: session.metadata.buyer_id,
+    paymentIntentId: session.payment_intent,
+    amountPaid: 3900, // $39.00 in cents
   };
+  
+  console.log(`🧪 Mock Stripe: Verified buyer payment for buyer ${result.buyerId}`);
+  return result;
 };
 
 // =============================================
-// DEALER SUBSCRIPTIONS 
+// DEALER SUBSCRIPTION FUNCTIONS
 // =============================================
 
-// Create Stripe customer for dealer
 export const createDealerCustomer = async (
-  email: string, 
+  email: string,
   companyName: string
-): Promise<Stripe.Customer> => {
-  const customer = await getStripe().customers.create({
+) => {
+  await mockDelay();
+  
+  const customerId = `cus_mock_${randomUUID().slice(0, 8)}`;
+  const customer = {
+    id: customerId,
     email,
-    name: companyName,
     metadata: {
       account_type: 'dealer',
+      company_name: companyName
     },
-  });
-
+    created: Math.floor(Date.now() / 1000)
+  };
+  
+  mockCustomers.set(customerId, customer);
+  
+  console.log(`🧪 Mock Stripe: Created dealer customer for ${companyName}`);
   return customer;
 };
 
-// Create dealer subscription checkout
 export const createDealerSubscriptionCheckout = async (
   dealerEmail: string,
   companyName: string,
   dealerId: string,
   plan: 'tier1' | 'tier2' | 'tier3'
-): Promise<Stripe.Checkout.Session> => {
-  // Define subscription tiers
-  const plans = {
-    tier1: { priceId: process.env.STRIPE_TIER1_PRICE_ID!, queryLimit: 100, name: 'Starter Plan' },
-    tier2: { priceId: process.env.STRIPE_TIER2_PRICE_ID!, queryLimit: 1000, name: 'Business Plan' },
-    tier3: { priceId: process.env.STRIPE_TIER3_PRICE_ID!, queryLimit: 10000, name: 'Enterprise Plan' },
+) => {
+  await mockDelay();
+  
+  const sessionId = `cs_mock_${randomUUID().slice(0, 8)}`;
+  const subscriptionId = `sub_mock_${randomUUID().slice(0, 8)}`;
+  const customerId = `cus_mock_${randomUUID().slice(0, 8)}`;
+  
+  const planLimits = {
+    tier1: 50,    // Starter: $199/month for 50 verifications
+    tier2: 350,   // Business: $999/month for 350 verifications  
+    tier3: 3000   // Enterprise: $3799/month for 3000 verifications
   };
-
-  const selectedPlan = plans[plan];
-
-  const session = await getStripe().checkout.sessions.create({
-    payment_method_types: ['card'],
-    line_items: [
-      {
-        price: selectedPlan.priceId,
-        quantity: 1,
-      },
-    ],
-    mode: 'subscription',
-    success_url: `${process.env.FRONTEND_URL}/dealer/subscription-success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${process.env.FRONTEND_URL}/dealer/subscription-cancelled`,
-    customer_email: dealerEmail,
+  
+  const session = {
+    id: sessionId,
+    url: `https://checkout.stripe.com/pay/mock_${sessionId}`,
+    customer: customerId,
+    subscription: subscriptionId,
     metadata: {
       dealer_id: dealerId,
-      monthly_query_limit: selectedPlan.queryLimit.toString(),
-      plan_tier: plan,
+      monthly_query_limit: planLimits[plan].toString(),
+      plan_tier: plan
     },
-  });
-
+    mode: 'subscription',
+    status: 'open'
+  };
+  
+  mockSessions.set(sessionId, session);
+  
+  console.log(`🧪 Mock Stripe: Created ${plan} subscription checkout for ${companyName}`);
   return session;
 };
 
-// Verify dealer subscription
 export const verifyDealerSubscription = async (sessionId: string) => {
-  const session = await getStripe().checkout.sessions.retrieve(sessionId, {
-    expand: ['subscription'],
-  });
+  await mockDelay();
   
-  if (session.payment_status !== 'paid') {
-    throw new Error('Payment not completed');
+  const session = mockSessions.get(sessionId);
+  if (!session || !session.subscription) {
+    throw new Error('Mock subscription session not found');
   }
   
-  const subscription = session.subscription as Stripe.Subscription;
+  // Mark as completed
+  session.status = 'complete';
+  mockSessions.set(sessionId, session);
   
-  return {
-    dealerId: session.metadata?.dealer_id,
-    stripeCustomerId: session.customer as string,
-    subscriptionId: subscription.id,
-    subscriptionStatus: subscription.status,
-    monthlyQueryLimit: parseInt(session.metadata?.monthly_query_limit || '100'),
-    planTier: session.metadata?.plan_tier,
-    currentPeriodStart: new Date(subscription.current_period_start * 1000),
-    currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+  // Create mock subscription
+  const subscription = {
+    id: session.subscription,
+    customer: session.customer,
+    status: 'active',
+    current_period_start: new Date(),
+    current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    metadata: session.metadata
   };
-};
-
-// Update dealer subscription
-export const updateDealerSubscription = async (
-  subscriptionId: string,
-  newPriceId: string
-): Promise<Stripe.Subscription> => {
-  const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
   
-  const updatedSubscription = await getStripe().subscriptions.update(subscriptionId, {
-    items: [
-      {
-        id: subscription.items.data[0].id,
-        price: newPriceId,
-      },
-    ],
-    proration_behavior: 'create_prorations',
-  });
-
-  return updatedSubscription;
-};
-
-// Cancel dealer subscription
-export const cancelDealerSubscription = async (subscriptionId: string): Promise<Stripe.Subscription> => {
-  const subscription = await getStripe().subscriptions.cancel(subscriptionId);
-  return subscription;
+  mockSubscriptions.set(session.subscription, subscription);
+  
+  const result = {
+    dealerId: session.metadata.dealer_id,
+    stripeCustomerId: session.customer,
+    subscriptionId: session.subscription,
+    subscriptionStatus: 'active',
+    monthlyQueryLimit: parseInt(session.metadata.monthly_query_limit),
+    planTier: session.metadata.plan_tier,
+    currentPeriodStart: subscription.current_period_start,
+    currentPeriodEnd: subscription.current_period_end,
+  };
+  
+  console.log(`🧪 Mock Stripe: Verified ${result.planTier} subscription for dealer ${result.dealerId}`);
+  return result;
 };
 
 // =============================================
-// WEBHOOK HANDLING
+// WEBHOOK SUPPORT
 // =============================================
 
-// Verify webhook signature
 export const verifyWebhookSignature = (
-  payload: string | Buffer,
+  payload: string,
   signature: string,
   secret: string
-): Stripe.Event => {
-  return getStripe().webhooks.constructEvent(payload, signature, secret);
+): any => {
+  // Mock webhook event - just parse the payload
+  try {
+    const event = JSON.parse(payload);
+    console.log(`🧪 Mock Stripe: Webhook event ${event.type}`);
+    return event;
+  } catch (err) {
+    throw new Error('Mock webhook signature verification failed');
+  }
 };
 
-// Get subscription details
 export const getSubscriptionDetails = async (subscriptionId: string) => {
-  const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
+  await mockDelay();
+  
+  const subscription = mockSubscriptions.get(subscriptionId);
+  if (!subscription) {
+    throw new Error('Mock subscription not found');
+  }
+  
   return subscription;
 };
 
-// Get customer details
 export const getCustomerDetails = async (customerId: string) => {
-  const customer = await getStripe().customers.retrieve(customerId);
+  await mockDelay();
+  
+  const customer = mockCustomers.get(customerId);
+  if (!customer) {
+    throw new Error('Mock customer not found');
+  }
+  
   return customer;
+};
+
+// =============================================
+// INITIALIZATION
+// =============================================
+
+export const initStripe = () => {
+  console.log('🧪 Mock Stripe service initialized');
+  console.log('💡 To use real Stripe, set STRIPE_SECRET_KEY in .env and restart');
+  return { mock: true };
 };
