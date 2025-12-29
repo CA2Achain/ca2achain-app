@@ -329,4 +329,112 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
       });
     }
   });
+
+  // Get dealer profile information
+  fastify.get('/profile', {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
+    try {
+      const authAccount = request.user!;
+      const dealer = await getDealerByAuthId(authAccount.id);
+      
+      if (!dealer) {
+        return reply.status(404).send({ 
+          success: false,
+          error: 'Dealer account not found' 
+        });
+      }
+
+      return reply.send({
+        success: true,
+        dealer: {
+          id: dealer.id,
+          company_name: dealer.company_name,
+          business_address: dealer.business_address,
+          business_phone: dealer.business_phone,
+          contact_name: dealer.contact_name,
+          email: dealer.email,
+          federal_firearms_license: dealer.federal_firearms_license,
+          subscription_status: dealer.subscription_status,
+          monthly_query_limit: dealer.monthly_query_limit,
+          queries_used_this_month: dealer.queries_used_this_month,
+          api_key_visible: dealer.api_key ? '••••••••••••' + dealer.api_key.slice(-4) : null,
+          created_at: dealer.created_at,
+          updated_at: dealer.updated_at
+        }
+      });
+    } catch (error) {
+      request.log.error({ error }, 'Failed to get dealer profile');
+      return reply.status(500).send({ 
+        success: false,
+        error: 'Failed to get profile' 
+      });
+    }
+  });
+
+  // Update dealer profile information
+  fastify.put('/profile', {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
+    try {
+      const authAccount = request.user!;
+      const dealer = await getDealerByAuthId(authAccount.id);
+      
+      if (!dealer) {
+        return reply.status(404).send({ 
+          success: false,
+          error: 'Dealer account not found' 
+        });
+      }
+
+      const updates = request.body as {
+        company_name?: string;
+        business_address?: string;
+        business_phone?: string;
+        contact_name?: string;
+        federal_firearms_license?: string;
+      };
+
+      // Only allow updating safe fields
+      const allowedUpdates = {
+        ...(updates.company_name && { company_name: updates.company_name }),
+        ...(updates.business_address && { business_address: updates.business_address }),
+        ...(updates.business_phone && { business_phone: updates.business_phone }),
+        ...(updates.contact_name && { contact_name: updates.contact_name }),
+        ...(updates.federal_firearms_license && { federal_firearms_license: updates.federal_firearms_license }),
+        updated_at: new Date().toISOString()
+      };
+
+      if (Object.keys(allowedUpdates).length === 1) { // Only updated_at
+        return reply.status(400).send({
+          success: false,
+          error: 'No valid fields provided for update'
+        });
+      }
+
+      const updatedDealer = await updateDealerAccount(dealer.id, allowedUpdates);
+
+      return reply.send({
+        success: true,
+        message: 'Profile updated successfully',
+        dealer: {
+          id: updatedDealer.id,
+          company_name: updatedDealer.company_name,
+          business_address: updatedDealer.business_address,
+          business_phone: updatedDealer.business_phone,
+          contact_name: updatedDealer.contact_name,
+          email: updatedDealer.email,
+          federal_firearms_license: updatedDealer.federal_firearms_license,
+          subscription_status: updatedDealer.subscription_status,
+          updated_at: updatedDealer.updated_at
+        }
+      });
+    } catch (error) {
+      request.log.error({ error }, 'Failed to update dealer profile');
+      return reply.status(500).send({ 
+        success: false,
+        error: 'Failed to update profile' 
+      });
+    }
+  });
 }

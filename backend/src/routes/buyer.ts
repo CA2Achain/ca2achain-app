@@ -387,4 +387,102 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
       });
     }
   });
+
+  // Get buyer profile information
+  fastify.get('/profile', {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
+    try {
+      const authAccount = request.user!;
+      const buyer = await getBuyerByEmail(authAccount.email);
+      
+      if (!buyer) {
+        return reply.status(404).send({ 
+          success: false,
+          error: 'Buyer account not found' 
+        });
+      }
+
+      return reply.send({
+        success: true,
+        buyer: {
+          id: buyer.id,
+          first_name: buyer.first_name,
+          last_name: buyer.last_name,
+          email: buyer.email,
+          phone: buyer.phone,
+          verification_status: buyer.verification_status,
+          payment_status: buyer.payment_status,
+          created_at: buyer.created_at,
+          updated_at: buyer.updated_at
+        }
+      });
+    } catch (error) {
+      request.log.error({ error }, 'Failed to get buyer profile');
+      return reply.status(500).send({ 
+        success: false,
+        error: 'Failed to get profile' 
+      });
+    }
+  });
+
+  // Update buyer profile information
+  fastify.put('/profile', {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
+    try {
+      const authAccount = request.user!;
+      const buyer = await getBuyerByEmail(authAccount.email);
+      
+      if (!buyer) {
+        return reply.status(404).send({ 
+          success: false,
+          error: 'Buyer account not found' 
+        });
+      }
+
+      const updates = request.body as {
+        first_name?: string;
+        last_name?: string;
+        phone?: string;
+      };
+
+      // Only allow updating safe fields
+      const allowedUpdates = {
+        ...(updates.first_name && { first_name: updates.first_name }),
+        ...(updates.last_name && { last_name: updates.last_name }),
+        ...(updates.phone && { phone: updates.phone }),
+        updated_at: new Date().toISOString()
+      };
+
+      if (Object.keys(allowedUpdates).length === 1) { // Only updated_at
+        return reply.status(400).send({
+          success: false,
+          error: 'No valid fields provided for update'
+        });
+      }
+
+      const updatedBuyer = await updateBuyerAccount(buyer.id, allowedUpdates);
+
+      return reply.send({
+        success: true,
+        message: 'Profile updated successfully',
+        buyer: {
+          id: updatedBuyer.id,
+          first_name: updatedBuyer.first_name,
+          last_name: updatedBuyer.last_name,
+          email: updatedBuyer.email,
+          phone: updatedBuyer.phone,
+          verification_status: updatedBuyer.verification_status,
+          updated_at: updatedBuyer.updated_at
+        }
+      });
+    } catch (error) {
+      request.log.error({ error }, 'Failed to update buyer profile');
+      return reply.status(500).send({ 
+        success: false,
+        error: 'Failed to update profile' 
+      });
+    }
+  });
 }
