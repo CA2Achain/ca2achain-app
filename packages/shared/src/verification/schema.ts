@@ -87,41 +87,49 @@ export const blockchainStatusSchema = z.enum(['pending', 'submitted', 'confirmed
 
 // Complete compliance event record (database)
 export const complianceEventSchema = z.object({
-  id: z.string().uuid(),
-  verification_id: z.string(),
-  buyer_id: z.string().uuid(),
-  dealer_id: z.string().uuid(),
+  id: z.string().uuid(), // UUIDv7 for chronological ordering
   
-  // Structured dealer request
-  dealer_request: dealerRequestSchema,
+  // Efficient querying (nullable for CCPA compliance)
+  buyer_id: z.string().uuid().nullable(),
+  dealer_id: z.string().uuid().nullable(),
   
-  // Privado ID verification results
-  privado_proofs: z.object({
-    age_verification_proof: privadoProofSchema,
-    address_verification_proof: privadoProofSchema,
-  }),
+  // Immutable audit trail (survive deletions)
+  buyer_reference_id: z.string(), // 'BUY_a8b9c2d1' - CCPA compliant
+  dealer_reference_id: z.string(), // 'DLR_f3e4d5c6' - Business continuity
+  verification_id: z.string(), // Business-friendly ID: VER_2026_001234
   
-  // AB 1263 compliance attestation
-  compliance_attestation: z.object({
-    dealer_id: z.string().uuid(),
-    ab1263_disclosure_presented: z.boolean(),
-    acknowledgment_received: z.boolean(),
-    compliance_version: z.string().default('AB1263-2026.1'),
-    attestation_timestamp: z.string().datetime(),
-  }),
+  // Complete verification record (enhanced JSON structure for hash reproducibility)
+  verification_data: z.record(z.any()), // Enhanced JSON with ZKP proofs + commitment hashes
   
-  // Blockchain integration
-  blockchain_status: blockchainStatusSchema,
-  polygon_tx_hash: z.string().optional(),
-  polygon_block_number: z.number().int().optional(),
-  
-  // Results
-  verification_result: z.enum(['PASS', 'FAIL']),
+  // Quick-access verification results (extracted from JSON for efficient queries)
   age_verified: z.boolean(),
   address_verified: z.boolean(),
-  confidence_score: z.number().min(0).max(1),
   
-  created_at: z.string().datetime(),
+  // Blockchain integration (court liability removal)
+  blockchain_transaction_hash: z.string().optional(), // Polygon immutable record
+  
+  verified_at: z.string().datetime(),
+});
+
+// Compliance event creation request (from dealer API)
+export const createComplianceEventSchema = z.object({
+  buyer_id: z.string().uuid(),
+  dealer_id: z.string().uuid(),
+  verification_id: z.string(),
+  verification_status: z.enum(['pending', 'approved', 'denied', 'expired']),
+  buyer_consent_given: z.boolean(),
+  dealer_business_purpose: z.string(),
+  transaction_purpose: z.enum(['firearm_accessory_sale', 'age_verification', 'compliance_audit']),
+  firearm_accessory_category: z.string().optional(),
+  verification_response: z.record(z.any()).optional(),
+});
+
+// Compliance event update (for verification results)
+export const updateComplianceEventSchema = z.object({
+  verification_status: z.enum(['pending', 'approved', 'denied', 'expired']).optional(),
+  verification_response: z.record(z.any()).optional(),
+  blockchain_transaction_hash: z.string().optional(),
+  zero_knowledge_proof_hash: z.string().optional(),
 });
 
 // =============================================
@@ -247,4 +255,25 @@ export const stripeWebhookSchema = z.object({
   data: z.object({
     object: z.any(),
   }),
+});
+
+// =============================================
+// COMPLIANCE & CCPA SCHEMAS
+// =============================================
+
+// Compliance history request (admin/audit functionality)
+export const complianceHistoryRequestSchema = z.object({
+  limit: z.number().int().min(1).max(100).default(50),
+  offset: z.number().int().min(0).default(0),
+  buyer_id: z.string().uuid().optional(),
+  dealer_id: z.string().uuid().optional(),
+  start_date: z.string().datetime().optional(),
+  end_date: z.string().datetime().optional(),
+});
+
+// CCPA data request schema
+export const ccpaRequestSchema = z.object({
+  request_type: z.enum(['export', 'delete_data', 'delete_account']),
+  user_email: z.string().email(),
+  verification_required: z.boolean().default(true),
 });

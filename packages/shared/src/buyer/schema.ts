@@ -2,14 +2,24 @@ import { z } from 'zod';
 
 // Buyer registration schema (for initial account creation)
 export const buyerRegistrationSchema = z.object({
-  email: z.string().email(),
+  first_name: z.string().min(1, 'First name is required'),
+  last_name: z.string().min(1, 'Last name is required'),
+  email: z.string().email('Valid email required'),
+  phone: z.string().min(10, 'Valid phone number required').optional(),
 });
 
 // Complete buyer account database entity schema
 export const buyerAccountSchema = z.object({
   id: z.string().uuid(),
-  auth_id: z.string().uuid(), // References auth_accounts.id
-  verification_status: z.enum(['pending', 'verified', 'expired', 'rejected']),
+  auth_id: z.string().uuid(), // References auth.users(id) - Supabase auth
+  
+  // Basic contact info
+  first_name: z.string().optional(),
+  last_name: z.string().optional(),
+  phone: z.string().optional(),
+  
+  // Verification status
+  verification_status: z.enum(['pending', 'verified', 'expired', 'rejected']).default('pending'),
   verified_at: z.string().datetime().optional(),
   verification_expires_at: z.string().datetime().optional(),
   
@@ -18,7 +28,7 @@ export const buyerAccountSchema = z.object({
   privado_credential_id: z.string().optional(),
   
   // One-time payment
-  payment_status: z.enum(['pending', 'paid', 'refunded']),
+  payment_status: z.enum(['pending', 'paid', 'refunded']).default('pending'),
   stripe_payment_id: z.string().optional(),
   
   created_at: z.string().datetime(),
@@ -68,11 +78,3 @@ export const buyerDataRequestSchema = z.object({
     errorMap: () => ({ message: 'Request type must be export, delete_data, or delete_account' })
   })
 });
-
-// Type exports
-export type BuyerRegistration = z.infer<typeof buyerRegistrationSchema>;
-export type BuyerAccount = z.infer<typeof buyerAccountSchema>;
-export type PrivadoClaims = z.infer<typeof privadoClaimsSchema>;
-export type BuyerSecrets = z.infer<typeof buyerSecretsSchema>;
-export type BuyerProfileUpdate = z.infer<typeof buyerProfileUpdateSchema>;
-export type BuyerDataRequest = z.infer<typeof buyerDataRequestSchema>;

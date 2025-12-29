@@ -1,56 +1,46 @@
 import { z } from 'zod';
-import { buyerRegistrationSchema, buyerAccountSchema, privadoClaimsSchema, buyerSecretsSchema } from './schema.js';
+import {
+  buyerRegistrationSchema,
+  buyerAccountSchema,
+  privadoClaimsSchema,
+  buyerSecretsSchema,
+  buyerProfileUpdateSchema,
+  buyerDataRequestSchema
+} from './schema.js';
 
-// Inferred types from schemas
+// Inferred types from Zod schemas
 export type BuyerRegistration = z.infer<typeof buyerRegistrationSchema>;
 export type BuyerAccount = z.infer<typeof buyerAccountSchema>;
 export type PrivadoClaims = z.infer<typeof privadoClaimsSchema>;
 export type BuyerSecrets = z.infer<typeof buyerSecretsSchema>;
+export type BuyerProfileUpdate = z.infer<typeof buyerProfileUpdateSchema>;
+export type BuyerDataRequest = z.infer<typeof buyerDataRequestSchema>;
 
-// Extended types for Privado ID
-export interface PrivadoCredential {
-  id: string;
-  type: ['VerifiableCredential', 'IdentityVerificationCredential'];
-  issuer: string; // Your DID
-  issuanceDate: string;
-  expirationDate: string;
-  credentialSubject: {
-    id: string; // Buyer's DID
-    claims: PrivadoClaims;
-  };
-  proof: {
-    type: 'BJJSignature2021';
-    signature: string;
-    issuerData: any;
-  };
+// Verification status enum (for buyer accounts)
+export type BuyerVerificationStatus = 'pending' | 'verified' | 'expired' | 'rejected';
+
+// Payment status enum (for buyer accounts)
+export type BuyerPaymentStatus = 'pending' | 'paid' | 'refunded';
+
+// CCPA request types
+export type DataRequestType = 'export' | 'delete_data' | 'delete_account';
+
+// API response types
+export interface BuyerRegistrationResponse {
+  success: boolean;
+  buyer_id?: string;
+  verification_required?: boolean;
+  error?: string;
 }
 
-export interface PersonaData {
-  name: string;
-  dob: string;
-  dl_number: string;
-  dl_expiration: string;
-  address_original: string;
-  address_normalized: string;
-  verification_session_id: string;
+export interface BuyerProfileResponse {
+  success: boolean;
+  buyer: BuyerAccount;
 }
 
-// Buyer status information
-export interface BuyerStatus {
-  verified: boolean;
-  verified_at?: string;
-  expires_at?: string;
-  is_expired: boolean;
-  needs_reverification: boolean;
-  has_data: boolean;
-  payment_status: 'pending' | 'paid' | 'refunded';
-}
-
-// Buyer audit log view
-export interface BuyerAuditLog {
-  verification_id: string;
-  dealer_company_name: string;
-  verified_claims: string[];
-  timestamp: string;
-  result: 'approved' | 'denied';
+export interface BuyerVerificationResponse {
+  success: boolean;
+  verification_status: BuyerVerificationStatus;
+  verification_expires_at?: string;
+  privado_credential?: PrivadoClaims;
 }

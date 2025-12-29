@@ -10,12 +10,16 @@ import {
   privadoProofRequestSchema,
   privadoProofSchema,
   complianceEventSchema,
+  createComplianceEventSchema,
+  updateComplianceEventSchema,
   dealerRequestSchema,
   blockchainStatusSchema,
   courtVerificationRequestSchema,
   courtVerificationResponseSchema,
   legacyVerificationRequestSchema,
-  stripeVerifiedOutputsSchema
+  stripeVerifiedOutputsSchema,
+  complianceHistoryRequestSchema,
+  ccpaRequestSchema
 } from './schema.js';
 
 // =============================================
@@ -42,6 +46,8 @@ export type PrivadoProof = z.infer<typeof privadoProofSchema>;
 // =============================================
 
 export type ComplianceEvent = z.infer<typeof complianceEventSchema>;
+export type CreateComplianceEvent = z.infer<typeof createComplianceEventSchema>;
+export type UpdateComplianceEvent = z.infer<typeof updateComplianceEventSchema>;
 export type DealerRequest = z.infer<typeof dealerRequestSchema>;
 export type BlockchainStatus = z.infer<typeof blockchainStatusSchema>;
 
@@ -92,6 +98,66 @@ export interface BlockchainComplianceRecord {
 export type LegacyVerificationRequest = z.infer<typeof legacyVerificationRequestSchema>;
 export type ClaimType = 'age_over_21' | 'age_over_65' | 'address_verified' | 'identity_verified';
 export type StripeVerifiedOutputs = z.infer<typeof stripeVerifiedOutputsSchema>;
+
+// =============================================
+// COMPLIANCE & CCPA TYPES  
+// =============================================
+
+export type ComplianceHistoryRequest = z.infer<typeof complianceHistoryRequestSchema>;
+export type CCPARequest = z.infer<typeof ccpaRequestSchema>;
+
+// Compliance API responses
+export interface ComplianceHistoryResponse {
+  success: boolean;
+  events: ComplianceEvent[];
+  total_events: number;
+  pagination: {
+    limit: number;
+    offset: number;
+    has_more: boolean;
+  };
+}
+
+export interface CCPAResponse {
+  success: boolean;
+  request_id: string;
+  status: 'processing' | 'completed' | 'failed';
+  message: string;
+  data_export_url?: string;
+}
+
+// CCPA deletion tracking
+export interface CCPADeletionStatus {
+  account_deleted: boolean;
+  compliance_events_anonymized: boolean;
+  payment_records_anonymized: boolean;
+  blockchain_records_preserved: boolean;
+  deletion_timestamp?: string;
+}
+
+// Customer reference patterns for compliance events
+export interface CustomerReferences {
+  buyer_reference_id?: string; // 'BUY_a8b9c2d1'
+  dealer_reference_id?: string; // 'DLR_f3e4d5c6'
+}
+
+// Blockchain proof data
+export interface BlockchainProofs {
+  blockchain_transaction_hash?: string;
+  zero_knowledge_proof_hash?: string;
+}
+
+// Compliance event with customer references (survives account deletion)
+export interface ComplianceEventWithReferences extends ComplianceEvent {
+  customer_references: CustomerReferences;
+  blockchain_proofs: BlockchainProofs;
+  deletion_status: {
+    buyer_deleted: boolean;
+    buyer_deleted_at?: string;
+    dealer_deleted: boolean;
+    dealer_deleted_at?: string;
+  };
+}
 
 // =============================================
 // AB 1263 SPECIFIC TYPES

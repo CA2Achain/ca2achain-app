@@ -3,11 +3,10 @@ import { z } from 'zod';
 // Dealer registration schema (for initial account creation)
 export const dealerRegistrationSchema = z.object({
   company_name: z.string().min(2),
+  business_email: z.string().email(),
   business_address: z.string().min(10, 'Complete business address required'),
   business_phone: z.string().min(10, 'Valid business phone required'),
-  contact_name: z.string().min(1, 'Contact name is required'),
-  federal_firearms_license: z.string().optional(), // FFL is optional for accessory dealers
-  email: z.string().email(),
+  business_ein: z.string().optional(), // Tax ID, not personal
 });
 
 // Complete dealer account database entity schema
@@ -15,10 +14,10 @@ export const dealerAccountSchema = z.object({
   id: z.string().uuid(),
   auth_id: z.string().uuid(),
   company_name: z.string(),
+  business_email: z.string(), // company@business.com format required
   business_address: z.string().optional(),
   business_phone: z.string().optional(),
-  contact_name: z.string().optional(),
-  federal_firearms_license: z.string().optional(),
+  business_ein: z.string().optional(), // Tax ID, not personal
   
   // Simple API authentication
   api_key_hash: z.string(),
@@ -47,20 +46,13 @@ export const dealerSubscriptionSchema = z.object({
 // Profile update schema
 export const dealerProfileUpdateSchema = z.object({
   company_name: z.string().min(1).optional(),
+  business_email: z.string().email().optional(),
   business_address: z.string().min(10).optional(),
   business_phone: z.string().min(10).optional(),
-  contact_name: z.string().min(1).optional(),
-  federal_firearms_license: z.string().optional(),
+  business_ein: z.string().optional(),
 });
 
 // API key schema
 export const dealerApiKeySchema = z.object({
   api_key: z.string().min(32, 'API key must be at least 32 characters'),
 });
-
-// Type exports
-export type DealerRegistration = z.infer<typeof dealerRegistrationSchema>;
-export type DealerAccount = z.infer<typeof dealerAccountSchema>;
-export type DealerSubscription = z.infer<typeof dealerSubscriptionSchema>;
-export type DealerProfileUpdate = z.infer<typeof dealerProfileUpdateSchema>;
-export type DealerApiKey = z.infer<typeof dealerApiKeySchema>;

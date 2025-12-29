@@ -1,14 +1,16 @@
 import { z } from 'zod';
 import { 
-  authAccountSchema, 
+  supabaseAuthUserSchema,
   authLoginSchema, 
-  authCallbackSchema
+  authCallbackSchema,
+  authSessionSchema
 } from './schema.js';
 
-// Inferred types
-export type AuthAccount = z.infer<typeof authAccountSchema>;
+// Inferred types from schemas
+export type SupabaseAuthUser = z.infer<typeof supabaseAuthUserSchema>;
 export type AuthLogin = z.infer<typeof authLoginSchema>;
 export type AuthCallback = z.infer<typeof authCallbackSchema>;
+export type AuthSession = z.infer<typeof authSessionSchema>;
 
 // JWT payload structure (from Supabase)
 export interface JWTPayload {
@@ -19,27 +21,37 @@ export interface JWTPayload {
   iat: number; // Issued at timestamp
   iss: string; // Issuer (Supabase)
   role: string; // Supabase role (authenticated, anon, service_role)
-  // Custom claims (we'll add via metadata)
+  // Custom claims we add via user metadata
   account_type?: 'buyer' | 'dealer';
+  account_id?: string; // buyer_accounts.id or dealer_accounts.id
 }
 
 // Extended auth context for FastifyRequest
 export interface AuthContext {
-  id: string;
+  auth_id: string; // Supabase auth.users.id
   email: string;
   account_type: 'buyer' | 'dealer';
+  account_id: string; // buyer_accounts.id or dealer_accounts.id
 }
 
-// Auth responses
+// API Response types
 export interface AuthResponse {
   success: boolean;
   message: string;
-  email?: string;
+  session?: AuthSession;
 }
 
 export interface AuthMeResponse {
-  id: string;
+  auth_id: string; // Supabase auth.users.id
   email: string;
   account_type: 'buyer' | 'dealer';
+  account_id: string; // Actual buyer/dealer account ID
   created_at: string;
+}
+
+// Magic link response
+export interface MagicLinkResponse {
+  success: boolean;
+  message: string;
+  email: string;
 }
