@@ -46,6 +46,8 @@ export type PrivadoProof = z.infer<typeof privadoProofSchema>;
 // =============================================
 
 export type ComplianceEvent = z.infer<typeof complianceEventSchema>;
+export type BlockchainInfo = z.infer<typeof blockchainInfoSchema>;
+export type VerificationData = z.infer<typeof verificationDataSchema>;
 export type CreateComplianceEvent = z.infer<typeof createComplianceEventSchema>;
 export type UpdateComplianceEvent = z.infer<typeof updateComplianceEventSchema>;
 export type DealerRequest = z.infer<typeof dealerRequestSchema>;

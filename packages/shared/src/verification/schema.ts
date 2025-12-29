@@ -87,7 +87,7 @@ export const blockchainStatusSchema = z.enum(['pending', 'submitted', 'confirmed
 
 // Complete compliance event record (database)
 export const complianceEventSchema = z.object({
-  id: z.string().uuid(), // UUIDv7 for chronological ordering
+  id: z.string().uuid(), // UUIDv7 for chronological ordering - serves as verification identifier
   
   // Efficient querying (nullable for CCPA compliance)
   buyer_id: z.string().uuid().nullable(),
@@ -96,7 +96,6 @@ export const complianceEventSchema = z.object({
   // Immutable audit trail (survive deletions)
   buyer_reference_id: z.string(), // 'BUY_a8b9c2d1' - CCPA compliant
   dealer_reference_id: z.string(), // 'DLR_f3e4d5c6' - Business continuity
-  verification_id: z.string(), // Business-friendly ID: VER_2026_001234
   
   // Complete verification record (enhanced JSON structure for hash reproducibility)
   verification_data: z.record(z.any()), // Enhanced JSON with ZKP proofs + commitment hashes
@@ -105,23 +104,55 @@ export const complianceEventSchema = z.object({
   age_verified: z.boolean(),
   address_verified: z.boolean(),
   
-  // Blockchain integration (court liability removal)
-  blockchain_transaction_hash: z.string().optional(), // Polygon immutable record
+  // Blockchain integration (single JSON blob)
+  blockchain_info: blockchainInfoSchema.optional(),
   
   verified_at: z.string().datetime(),
 });
 
-// Compliance event creation request (from dealer API)
-export const createComplianceEventSchema = z.object({
-  buyer_id: z.string().uuid(),
-  dealer_id: z.string().uuid(),
-  verification_id: z.string(),
-  verification_status: z.enum(['pending', 'approved', 'denied', 'expired']),
-  buyer_consent_given: z.boolean(),
-  dealer_business_purpose: z.string(),
-  transaction_purpose: z.enum(['firearm_accessory_sale', 'age_verification', 'compliance_audit']),
-  firearm_accessory_category: z.string().optional(),
-  verification_response: z.record(z.any()).optional(),
+// Blockchain information schema for JSON storage
+export const blockchainInfoSchema = z.object({
+  network: z.string().default('polygon-mainnet'),
+  transaction_hash: z.string().optional(),
+  contract_address: z.string().optional(),
+  event_index: z.number().int().optional(),
+  block_number: z.number().int().optional(),
+});
+
+// Enhanced verification data structure for blockchain hash reproducibility
+export const verificationDataSchema = z.object({
+  compliance_event: z.object({
+    version: z.literal("AB1263-2026.1"),
+    compliance_event_id: z.string().uuid(), // Main compliance_events.id
+    timestamp: z.string().datetime(),
+    buyer_reference: z.string(), // 'BUY_a8b9c2d1'
+    dealer_reference: z.string(), // 'DLR_f3e4d5c6'
+  }),
+  zkp_verifications: z.object({
+    age_check: z.object({
+      zkp_age_proof: z.string(), // Privado proof
+      buyer_secret: z.string(), // buyer_uuid_hash
+      age_verified: z.boolean(),
+      verified_at_timestamp: z.string().datetime(),
+      commitment_hash: z.string(), // AgeCommitment_Hash
+    }),
+    address_verification: z.object({
+      zkp_address_proof: z.string(), // Privado proof  
+      normalized_buyer_address: z.string(),
+      normalized_shipping_address: z.string(),
+      match_confidence: z.number().min(0).max(1),
+      address_match_verified: z.boolean(),
+      verified_at_timestamp: z.string().datetime(),
+      commitment_hash: z.string(), // Address_Match_Commitment_Hash
+    })
+  }),
+  legal_attestation: z.object({
+    notice_version: z.literal("CA-DOJ-2026-V1"),
+    ab1263_dealer_received_buyer_acceptance: z.boolean(),
+    verification_timestamp: z.string().datetime(),
+    attestation_hash: z.string(), // Dealer_Attestation_Hash
+    transaction_link_hash: z.string(), // Transaction_Link_Hash
+  })
 });
 
 // Compliance event update (for verification results)
