@@ -2,12 +2,13 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { getClient } from '../services/database/connection.js';
 import { getBuyerByAuth } from '../services/database/buyer-accounts.js';
 import { getDealerByAuth } from '../services/database/dealer-accounts.js';
+import type { BuyerAccount, DealerAccount } from '@ca2achain/shared';
 
 export interface AuthUser {
   id: string;
   email: string;
   account_type: 'buyer' | 'dealer' | null;
-  account_data: any; // Will be BuyerAccount or DealerAccount
+  account_data: BuyerAccount | DealerAccount | null;
 }
 
 // Extend FastifyRequest to include user
@@ -46,25 +47,25 @@ export async function authMiddleware(
     }
 
     // Try to find buyer account first
-    let accountData = await getBuyerByAuth(user.id);
-    if (accountData) {
+    const buyerAccountData = await getBuyerByAuth(user.id);
+    if (buyerAccountData) {
       request.user = {
         id: user.id,
         email: user.email!,
         account_type: 'buyer',
-        account_data: accountData
+        account_data: buyerAccountData
       };
       return;
     }
 
     // Try dealer account
-    accountData = await getDealerByAuth(user.id);
-    if (accountData) {
+    const dealerAccountData = await getDealerByAuth(user.id);
+    if (dealerAccountData) {
       request.user = {
         id: user.id,
         email: user.email!,
         account_type: 'dealer',
-        account_data: accountData
+        account_data: dealerAccountData
       };
       return;
     }
