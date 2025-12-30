@@ -5,6 +5,7 @@ import {
   normalizedAddressSchema,
   addressStringSchema,
   phoneNumberSchema,
+  dateOfBirthSchema,
   paymentStatusSchema,
   creditCardInfoSchema,
   stripeInfoSchema,
@@ -23,6 +24,9 @@ export type AddressString = z.infer<typeof addressStringSchema>;
 
 // Phone number type
 export type PhoneNumber = z.infer<typeof phoneNumberSchema>;
+
+// Date of birth type
+export type DateOfBirth = z.infer<typeof dateOfBirthSchema>;
 
 // =============================================
 // PAYMENT DATA TYPES

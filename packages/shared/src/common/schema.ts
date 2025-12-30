@@ -9,6 +9,16 @@ export const phoneNumberSchema = z.string()
   .regex(/^\+?1?[-.\s]?\(?[2-9]\d{2}\)?[-.\s]?\d{3}[-.\s]?\d{4}$/, 'Valid US phone number required')
   .transform(phone => phone.replace(/\D/g, '').replace(/^1/, '')); // Normalize to 10 digits
 
+// Date of birth validation
+export const dateOfBirthSchema = z.string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
+  .refine(date => {
+    const parsedDate = new Date(date);
+    const now = new Date();
+    const age = now.getFullYear() - parsedDate.getFullYear();
+    return age >= 0 && age <= 120; // Reasonable age range
+  }, 'Invalid date of birth');
+
 // Address structure for consistent address handling
 export const addressSchema = z.object({
   street: z.string().min(1, 'Street address is required'),

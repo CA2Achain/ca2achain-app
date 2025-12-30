@@ -124,6 +124,7 @@ export const verificationDataSchema = z.object({
     age_check: z.object({
       zkp_age_proof: z.string(), // Privado proof JSON
       buyer_secret: z.string(), // buyer_uuid_hash
+      date_of_birth: z.string().date(), // YYYY-MM-DD format for hash reproducibility
       age_verified: z.boolean(),
       verified_at_timestamp: z.string().datetime(),
       commitment_hash: z.string(), // AgeCommitment_Hash

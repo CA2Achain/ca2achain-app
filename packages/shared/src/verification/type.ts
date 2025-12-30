@@ -41,6 +41,7 @@ export interface AgeCommitment {
   zkp_age_proof: string; // Privado proof JSON
   buyer_reference: string; // 'BUY_a8b9c2d1'
   buyer_secret: string; // buyer_uuid_hash
+  date_of_birth: string; // YYYY-MM-DD format for hash reproducibility
   age_verified: boolean;
   verified_at_timestamp: string; // ISO timestamp
 }

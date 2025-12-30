@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { addressSchema } from '../common/schema.js';
+import { addressSchema, dateOfBirthSchema } from '../common/schema.js';
 import { privadoAgeProofSchema, privadoAddressProofSchema } from '../verification/schema.js';
 
 // =============================================
@@ -9,7 +9,7 @@ import { privadoAgeProofSchema, privadoAddressProofSchema } from '../verificatio
 // Driver's license data (only what we need for verification)
 export const driverLicenseDataSchema = z.object({
   dl_number: z.string(),
-  date_of_birth: z.string().date(), // YYYY-MM-DD format
+  date_of_birth: dateOfBirthSchema, // Use common date of birth validation
   full_name: z.object({
     first_name: z.string(),
     last_name: z.string(),
@@ -91,6 +91,7 @@ export const hashReproducibilityDataSchema = z.object({
   
   // Age commitment data (from verification schema)
   zkp_age_proof: z.string(), // Serialized privadoAgeProofSchema
+  date_of_birth: dateOfBirthSchema, // Use common date validation for hash reproducibility
   age_verified: z.boolean(),
   verified_at_timestamp: z.string().datetime(),
   
