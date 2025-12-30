@@ -1,256 +1,236 @@
 import { FastifyInstance } from 'fastify';
-import { 
-  verifyPersonaWebhook, 
-  getVerifiedPersonaData 
-} from '../services/mocks/persona.js';
-import { verifyWebhookSignature, getSubscriptionDetails } from '../services/service-resolver.js';
-import { 
-  getBuyerById, 
-  updateBuyerAccount,
-  createBuyerSecrets,
-  getDealerById,
-  updateDealerAccount
-} from '../services/supabase.js';
-import { encryptPersonaData, encryptPrivadoCredential, generateEncryptionKeyId } from '../services/encryption.js';
-import { issuePrivadoCredential } from '../services/polygonid.js';
-import { sendBuyerVerificationComplete, sendDealerSubscriptionConfirmed } from '../services/email.js';
+import { createRouteSchema, sendSuccess, sendError } from '../utils/api-responses.js';
+import { updatePaymentStatus } from '../services/database/payment-events.js';
+import { verifyWebhookSignature } from '../services/service-resolver.js';
 
 export default async function webhookRoutes(fastify: FastifyInstance) {
-  
-  // Persona webhook - buyer identity verification events
-  fastify.post('/persona', async (request, reply) => {
-    try {
-      const signature = request.headers['persona-signature'] as string;
-      const payload = JSON.stringify(request.body);
-
-      // Verify webhook signature (basic implementation)
-      const isValid = verifyPersonaWebhook(payload, signature);
-      if (!isValid) {
-        request.log.warn('Invalid Persona webhook signature');
-        return reply.status(401).send({ error: 'Invalid signature' });
-      }
-
-      const event = request.body as any;
-
-      // Handle inquiry completed and approved
-      if (event.data?.type === 'inquiry' && event.data?.attributes?.status === 'approved') {
-        const inquiryId = event.data.id;
-        const buyerId = event.data.attributes['reference-id']; // This should be buyer.id
-
-        request.log.info(`Processing Persona webhook for buyer ${buyerId}, inquiry ${inquiryId}`);
-
-        // Get verified data from Persona
-        const personaData = await getVerifiedPersonaData(inquiryId);
-        
-        if (!personaData) {
-          request.log.error(`No verified data available for inquiry ${inquiryId}`);
-          return reply.status(400).send({ error: 'No verified data available' });
+  // Stripe payment webhook handler
+  fastify.post('/stripe', createRouteSchema({
+    tags: ['webhooks'],
+    summary: 'Stripe webhook handler',
+    description: 'Handle Stripe payment webhook events for payment status updates',
+    body: {
+      type: 'object',
+      description: 'Stripe webhook event payload',
+      additionalProperties: true
+    },
+    response: {
+      description: 'Webhook processed successfully',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', enum: [true] },
+        data: {
+          type: 'object',
+          properties: {
+            received: { type: 'boolean' },
+            event_type: { type: 'string' },
+            processed_at: { type: 'string', format: 'date-time' }
+          }
         }
-
-        // Get buyer record
-        const buyer = await getBuyerById(buyerId);
-        if (!buyer) {
-          request.log.error(`Buyer not found for ID ${buyerId}`);
-          return reply.status(404).send({ error: 'Buyer not found' });
-        }
-
-        // Issue Privado ID credential
-        const privadoCredential = await issuePrivadoCredential(buyerId, personaData);
-
-        // Encrypt and store buyer secrets
-        const encryptionKeyId = generateEncryptionKeyId();
-        const encryptedPersonaData = encryptPersonaData(personaData);
-        const encryptedCredential = encryptPrivadoCredential(privadoCredential);
-
-        await createBuyerSecrets({
-          buyer_id: buyerId,
-          encrypted_persona_data: encryptedPersonaData,
-          encrypted_privado_credential: encryptedCredential,
-          encryption_key_id: encryptionKeyId,
-          persona_verification_session: inquiryId,
-        });
-
-        // Update buyer status
-        const updatedBuyer = await updateBuyerAccount(buyerId, {
-          verification_status: 'verified',
-          verified_at: new Date().toISOString(),
-          verification_expires_at: personaData.dl_expiration,
-          privado_did: privadoCredential.credentialSubject.id,
-          privado_credential_id: privadoCredential.id,
-        });
-
-        // Get buyer email from auth_accounts
-        // Note: We'd need to join with auth_accounts to get email
-        // For now, using a placeholder - this should be improved
-        const buyerEmail = 'placeholder@example.com'; // TODO: Get actual email
-
-        // Send completion email
-        await sendBuyerVerificationComplete(buyerEmail, personaData.dl_expiration);
-
-        request.log.info(`Buyer ${buyerId} verification completed successfully`);
       }
-
-      // Handle inquiry declined/failed
-      if (event.data?.type === 'inquiry' && 
-          ['declined', 'failed'].includes(event.data?.attributes?.status)) {
-        const inquiryId = event.data.id;
-        const buyerId = event.data.attributes['reference-id'];
-        const status = event.data.attributes.status;
-
-        // Update buyer status to rejected
-        await updateBuyerAccount(buyerId, {
-          verification_status: 'rejected',
-        });
-
-        request.log.info(`Buyer ${buyerId} verification ${status} for inquiry ${inquiryId}`);
-      }
-
-      return reply.send({ 
-        success: true,
-        received: true,
-        processed_at: new Date().toISOString(),
-      });
-
-    } catch (error) {
-      request.log.error({ error }, 'Persona webhook processing failed');
-      return reply.status(500).send({ error: 'Webhook processing failed' });
     }
-  });
-
-  // Stripe webhook - payment and subscription events
-  fastify.post('/stripe', async (request, reply) => {
+  }), async (request, reply) => {
     try {
+      const stripeEvent = request.body as any;
       const signature = request.headers['stripe-signature'] as string;
-      const payload = (request as any).rawBody as string;
 
-      // Verify webhook signature
-      const event = verifyWebhookSignature(
-        payload,
-        signature,
-        process.env.STRIPE_WEBHOOK_SECRET!
+      // Verify webhook signature (mock verification for now)
+      const isValidSignature = verifyWebhookSignature(
+        JSON.stringify(request.body),
+        signature
       );
 
-      request.log.info(`Processing Stripe webhook: ${event.type}`);
-
-      // Handle different event types
-      switch (event.type) {
-        
-        // Buyer payment events
-        case 'checkout.session.completed':
-          await handleCheckoutCompleted(event.data.object, request);
-          break;
-
-        case 'payment_intent.succeeded':
-          await handlePaymentSucceeded(event.data.object, request);
-          break;
-
-        // Dealer subscription events  
-        case 'customer.subscription.created':
-        case 'customer.subscription.updated':
-          await handleSubscriptionUpdate(event.data.object, request);
-          break;
-
-        case 'customer.subscription.deleted':
-          await handleSubscriptionDeleted(event.data.object, request);
-          break;
-
-        case 'invoice.payment_succeeded':
-          await handleInvoicePaymentSucceeded(event.data.object, request);
-          break;
-
-        case 'invoice.payment_failed':
-          await handleInvoicePaymentFailed(event.data.object, request);
-          break;
-
-        default:
-          request.log.info(`Unhandled Stripe event type: ${event.type}`);
+      if (!isValidSignature) {
+        return sendError(reply, 'Invalid webhook signature', 401);
       }
 
-      return reply.send({ 
-        success: true,
-        received: true,
-        event_type: event.type,
-        processed_at: new Date().toISOString(),
-      });
+      const processedAt = new Date().toISOString();
+
+      // Handle different Stripe event types
+      switch (stripeEvent.type) {
+        case 'payment_intent.succeeded': {
+          const paymentIntent = stripeEvent.data.object;
+          
+          // Update payment status using our database function
+          await updatePaymentStatus(
+            paymentIntent.metadata?.payment_id || paymentIntent.id,
+            'succeeded',
+            {
+              stripe_info: {
+                payment_intent_id: paymentIntent.id,
+                amount_received: paymentIntent.amount_received,
+                payment_method: paymentIntent.payment_method,
+                processed_at: processedAt
+              }
+            }
+          );
+
+          return sendSuccess(reply, {
+            received: true,
+            event_type: 'payment_intent.succeeded',
+            processed_at: processedAt
+          }, 200);
+        }
+
+        case 'payment_intent.payment_failed': {
+          const paymentIntent = stripeEvent.data.object;
+          
+          await updatePaymentStatus(
+            paymentIntent.metadata?.payment_id || paymentIntent.id,
+            'failed',
+            {
+              stripe_info: {
+                payment_intent_id: paymentIntent.id,
+                failure_reason: paymentIntent.last_payment_error?.message,
+                processed_at: processedAt
+              }
+            }
+          );
+
+          return sendSuccess(reply, {
+            received: true,
+            event_type: 'payment_intent.payment_failed',
+            processed_at: processedAt
+          }, 200);
+        }
+
+        case 'checkout.session.completed': {
+          const session = stripeEvent.data.object;
+          
+          // Handle successful checkout completion
+          if (session.metadata?.payment_id) {
+            await updatePaymentStatus(
+              session.metadata.payment_id,
+              'succeeded',
+              {
+                stripe_info: {
+                  session_id: session.id,
+                  customer: session.customer,
+                  payment_status: session.payment_status,
+                  processed_at: processedAt
+                }
+              }
+            );
+          }
+
+          return sendSuccess(reply, {
+            received: true,
+            event_type: 'checkout.session.completed',
+            processed_at: processedAt
+          }, 200);
+        }
+
+        case 'invoice.payment_succeeded': {
+          const invoice = stripeEvent.data.object;
+          
+          // Handle subscription payment success
+          if (invoice.metadata?.payment_id) {
+            await updatePaymentStatus(
+              invoice.metadata.payment_id,
+              'succeeded',
+              {
+                stripe_info: {
+                  invoice_id: invoice.id,
+                  subscription_id: invoice.subscription,
+                  amount_paid: invoice.amount_paid,
+                  processed_at: processedAt
+                }
+              }
+            );
+          }
+
+          return sendSuccess(reply, {
+            received: true,
+            event_type: 'invoice.payment_succeeded',
+            processed_at: processedAt
+          }, 200);
+        }
+
+        case 'invoice.payment_failed': {
+          const invoice = stripeEvent.data.object;
+          
+          if (invoice.metadata?.payment_id) {
+            await updatePaymentStatus(
+              invoice.metadata.payment_id,
+              'failed',
+              {
+                stripe_info: {
+                  invoice_id: invoice.id,
+                  subscription_id: invoice.subscription,
+                  failure_reason: invoice.last_finalization_error?.message,
+                  processed_at: processedAt
+                }
+              }
+            );
+          }
+
+          return sendSuccess(reply, {
+            received: true,
+            event_type: 'invoice.payment_failed',
+            processed_at: processedAt
+          }, 200);
+        }
+
+        default: {
+          // Log unhandled event types but still return success
+          console.log(`Unhandled Stripe webhook event: ${stripeEvent.type}`);
+          
+          return sendSuccess(reply, {
+            received: true,
+            event_type: stripeEvent.type,
+            processed_at: processedAt
+          }, 200);
+        }
+      }
 
     } catch (error) {
-      request.log.error({ error }, 'Stripe webhook processing failed');
-      return reply.status(400).send({ error: 'Webhook error' });
+      console.error('Stripe webhook error:', error);
+      return sendError(reply, 'Webhook processing failed', 500);
     }
   });
-}
 
-// Helper functions for Stripe event processing
+  // Persona webhook handler (for future identity verification webhooks)
+  fastify.post('/persona', createRouteSchema({
+    tags: ['webhooks'],
+    summary: 'Persona webhook handler',
+    description: 'Handle Persona identity verification webhook events',
+    body: {
+      type: 'object',
+      description: 'Persona webhook event payload',
+      additionalProperties: true
+    }
+  }), async (request, reply) => {
+    try {
+      const personaEvent = request.body as any;
+      
+      // For now, just log the event (Persona integration will be implemented later)
+      console.log('Persona webhook received:', {
+        type: personaEvent.type,
+        inquiry_id: personaEvent.data?.id,
+        status: personaEvent.data?.attributes?.status
+      });
 
-async function handleCheckoutCompleted(session: any, request: any) {
-  const metadata = session.metadata;
-  
-  if (metadata?.buyer_id) {
-    // Buyer verification payment completed
-    await updateBuyerAccount(metadata.buyer_id, {
-      payment_status: 'paid',
-      stripe_payment_id: session.payment_intent,
-    });
-    
-    request.log.info(`Buyer payment completed for buyer ${metadata.buyer_id}`);
-  }
-  
-  if (metadata?.dealer_id) {
-    // Dealer subscription setup completed
-    const subscription = await getSubscriptionDetails(session.subscription);
-    
-    await updateDealerAccount(metadata.dealer_id, {
-      stripe_subscription_id: session.subscription,
-      subscription_status: subscription.status as any,
-      monthly_query_limit: parseInt(metadata.monthly_query_limit || '100'),
-    });
-    
-    request.log.info(`Dealer subscription completed for dealer ${metadata.dealer_id}`);
-  }
-}
+      return sendSuccess(reply, {
+        received: true,
+        event_type: personaEvent.type,
+        processed_at: new Date().toISOString()
+      }, 200);
 
-async function handlePaymentSucceeded(paymentIntent: any, request: any) {
-  request.log.info(`Payment succeeded: ${paymentIntent.id}`);
-  // Additional payment processing logic if needed
-}
+    } catch (error) {
+      console.error('Persona webhook error:', error);
+      return sendError(reply, 'Webhook processing failed', 500);
+    }
+  });
 
-async function handleSubscriptionUpdate(subscription: any, request: any) {
-  const customerId = subscription.customer;
-  
-  // Find dealer by Stripe customer ID
-  // Note: We'd need to implement getDealerByStripeCustomerId
-  // For now, logging the event
-  
-  request.log.info(`Subscription updated: ${subscription.id} for customer ${customerId}`);
-}
-
-async function handleSubscriptionDeleted(subscription: any, request: any) {
-  const customerId = subscription.customer;
-  
-  // Update dealer subscription status to cancelled
-  // Note: We'd need to implement getDealerByStripeCustomerId
-  
-  request.log.info(`Subscription deleted: ${subscription.id} for customer ${customerId}`);
-}
-
-async function handleInvoicePaymentSucceeded(invoice: any, request: any) {
-  const subscriptionId = invoice.subscription;
-  
-  // Reset monthly query count on successful payment
-  // Note: We'd need to implement getDealerByStripeSubscriptionId
-  
-  request.log.info(`Invoice payment succeeded for subscription: ${subscriptionId}`);
-  
-  // Reset dealer query count for new billing period
-  // await resetDealerQueryCount(dealerId);
-}
-
-async function handleInvoicePaymentFailed(invoice: any, request: any) {
-  const subscriptionId = invoice.subscription;
-  
-  // Handle failed payment - maybe suspend dealer account
-  request.log.warn(`Invoice payment failed for subscription: ${subscriptionId}`);
-  
-  // Could update dealer status to 'past_due'
-  // await updateDealerAccount(dealerId, { subscription_status: 'past_due' });
+  // Health check for webhook endpoints
+  fastify.get('/health', async (request, reply) => {
+    return sendSuccess(reply, {
+      webhook_service: 'healthy',
+      endpoints: [
+        '/webhooks/stripe',
+        '/webhooks/persona'
+      ],
+      timestamp: new Date().toISOString()
+    }, 200);
+  });
 }

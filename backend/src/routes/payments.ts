@@ -1,154 +1,209 @@
 import { FastifyInstance } from 'fastify';
+import { createRouteSchema, sendSuccess, sendError, sendValidationError, authRequired } from '../utils/api-responses.js';
+import { 
+  createPaymentEvent, 
+  updatePaymentStatus, 
+  getBuyerPaymentHistory, 
+  getDealerPaymentHistory 
+} from '../services/database/payment-events.js';
+import { 
+  createBuyerCheckoutSession, 
+  verifyBuyerPayment,
+  createDealerSubscriptionCheckout,
+  verifyDealerSubscription,
+  verifyWebhookSignature 
+} from '../services/service-resolver.js';
+import {
+  createPaymentSchema,
+  updatePaymentSchema,
+  customerPaymentHistorySchema,
+  type CreatePayment,
+  type Payment
+} from '@ca2achain/shared';
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
-  
-  // Stripe webhook
-  fastify.post('/webhook', async (request, reply) => {
-    try {
-      const stripeEvent = request.body as any;
-
-      if (stripeEvent.type === 'payment_intent.succeeded') {
-        const paymentIntent = stripeEvent.data.object;
-        const { updatePaymentStatus } = await import('../services/supabase.js');
-        
-        await updatePaymentStatus(paymentIntent.id, {
-          status: 'succeeded',
-          payment_timestamp: new Date().toISOString()
-        });
-      }
-
-      if (stripeEvent.type === 'payment_intent.payment_failed') {
-        const paymentIntent = stripeEvent.data.object;
-        const { updatePaymentStatus } = await import('../services/supabase.js');
-        
-        await updatePaymentStatus(paymentIntent.id, {
-          status: 'failed',
-          payment_timestamp: new Date().toISOString()
-        });
-      }
-
-      return reply.status(200).send({ received: true });
-    } catch (error) {
-      return reply.status(400).send({ error: 'Webhook failed' });
-    }
-  });
-
-  // Get user payment history
-  fastify.get('/history', {
-    preHandler: [fastify.authenticate],
-  }, async (request, reply) => {
-    try {
-      const authAccount = request.user!;
-      const { getBuyerByEmail, getDealerByAuthId, getUserPayments } = await import('../services/supabase.js');
-      
-      let accountId: string;
-      let accountType: 'buyer' | 'dealer';
-      
-      // Determine account type and get account ID
-      const buyer = await getBuyerByEmail(authAccount.email);
-      if (buyer) {
-        accountId = buyer.id;
-        accountType = 'buyer';
-      } else {
-        const dealer = await getDealerByAuthId(authAccount.id);
-        if (!dealer) {
-          return reply.status(404).send({ error: 'Account not found' });
+  // Create buyer payment session
+  fastify.post('/buyer/checkout', createRouteSchema({
+    tags: ['payments'],
+    summary: 'Create buyer payment session',
+    description: 'Create Stripe checkout session for buyer $39 verification fee',
+    security: authRequired,
+    response: {
+      description: 'Payment session created',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', enum: [true] },
+        data: {
+          type: 'object',
+          properties: {
+            checkout_url: { type: 'string', format: 'uri' },
+            session_id: { type: 'string' },
+            payment_id: { type: 'string', format: 'uuid' }
+          }
         }
-        accountId = dealer.id;
-        accountType = 'dealer';
+      }
+    }
+  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+    try {
+      if (!request.user || request.user.account_type !== 'buyer') {
+        return sendError(reply, 'Buyer access required', 403);
       }
 
-      const payments = await getUserPayments(accountId);
+      const buyer = request.user.account_data;
       
-      return reply.send({
-        account_type: accountType,
-        payments: payments.map(p => ({
-          id: p.id,
-          customer_reference_id: p.customer_reference_id,
-          transaction_type: p.transaction_type,
-          amount_cents: p.amount_cents,
-          status: p.status,
-          payment_timestamp: p.payment_timestamp,
-          created_at: p.created_at
-        }))
-      });
+      // Check if payment already completed
+      if (buyer.payment_status === 'succeeded') {
+        return sendError(reply, 'Payment already completed', 400);
+      }
 
-    } catch (error) {
-      return reply.status(500).send({ error: 'Failed to get payment history' });
-    }
-  });
-
-  // Get verification payments (buyers only)
-  fastify.get('/verifications', {
-    preHandler: [fastify.authenticate],
-  }, async (request, reply) => {
-    try {
-      // TODO: Add admin check
-      const { getPaymentsByTransactionType } = await import('../services/supabase.js');
-      const payments = await getPaymentsByTransactionType('verification');
-      
-      return reply.send({
+      // Create payment record first (following createPaymentSchema)
+      const paymentData: CreatePayment = {
+        buyer_id: buyer.id,
         transaction_type: 'verification',
-        total_payments: payments.length,
-        total_revenue_cents: payments
-          .filter(p => p.status === 'succeeded')
-          .reduce((sum, p) => sum + p.amount_cents, 0),
-        payments: payments.map(p => ({
-          id: p.id,
-          customer_reference_id: p.customer_reference_id,
-          amount_cents: p.amount_cents,
-          status: p.status,
-          payment_timestamp: p.payment_timestamp
-        }))
-      });
+        amount_cents: 3900, // $39
+        customer_reference_id: buyer.buyer_reference_id,
+        payment_provider_info: {
+          stripe_info: {
+            customer_email: request.user.email
+          }
+        }
+      };
+
+      const payment = await createPaymentEvent(paymentData);
+
+      // Create Stripe checkout session (mock)
+      const session = await createBuyerCheckoutSession(
+        request.user.email,
+        buyer.id
+      );
+
+      return sendSuccess(reply, {
+        checkout_url: session.url,
+        session_id: session.id,
+        payment_id: payment.id
+      }, 200);
 
     } catch (error) {
-      return reply.status(500).send({ error: 'Failed to get verification payments' });
+      console.error('Create buyer checkout error:', error);
+      return sendError(reply, 'Failed to create payment session', 500);
     }
   });
 
-  // Get subscription payments (dealers only)
-  fastify.get('/subscriptions', {
-    preHandler: [fastify.authenticate],
-  }, async (request, reply) => {
+  // Create dealer subscription payment
+  fastify.post('/dealer/subscription', createRouteSchema({
+    tags: ['payments'],
+    summary: 'Create dealer subscription payment',
+    description: 'Create Stripe checkout for dealer subscription',
+    security: authRequired,
+    body: {
+      type: 'object',
+      properties: {
+        subscription_tier: { type: 'integer', minimum: 1, maximum: 3 }
+      },
+      required: ['subscription_tier']
+    }
+  }), { preHandler: fastify.authenticate }, async (request, reply) => {
     try {
-      // TODO: Add admin check
-      const { getPaymentsByTransactionType } = await import('../services/supabase.js');
-      const payments = await getPaymentsByTransactionType('subscription');
-      
-      return reply.send({
+      if (!request.user || request.user.account_type !== 'dealer') {
+        return sendError(reply, 'Dealer access required', 403);
+      }
+
+      const dealer = request.user.account_data;
+      const { subscription_tier } = request.body as { subscription_tier: number };
+
+      // Calculate subscription amount based on tier
+      const tierPricing = { 1: 19900, 2: 99900, 3: 379900 }; // $199, $999, $3799
+      const amount = tierPricing[subscription_tier as keyof typeof tierPricing];
+
+      // Create payment record
+      const paymentData: CreatePayment = {
+        dealer_id: dealer.id,
         transaction_type: 'subscription',
-        total_payments: payments.length,
-        total_revenue_cents: payments
-          .filter(p => p.status === 'succeeded')
-          .reduce((sum, p) => sum + p.amount_cents, 0),
-        payments: payments.map(p => ({
-          id: p.id,
-          customer_reference_id: p.customer_reference_id,
-          amount_cents: p.amount_cents,
-          status: p.status,
-          payment_timestamp: p.payment_timestamp
-        }))
-      });
+        amount_cents: amount,
+        customer_reference_id: dealer.dealer_reference_id,
+        payment_provider_info: {
+          stripe_info: {
+            customer_email: dealer.business_email,
+            subscription_tier
+          }
+        }
+      };
+
+      const payment = await createPaymentEvent(paymentData);
+
+      // Create Stripe subscription checkout (mock)
+      const session = await createDealerSubscriptionCheckout(
+        dealer.business_email,
+        dealer.id,
+        subscription_tier
+      );
+
+      return sendSuccess(reply, {
+        checkout_url: session.url,
+        session_id: session.id,
+        payment_id: payment.id
+      }, 200);
 
     } catch (error) {
-      return reply.status(500).send({ error: 'Failed to get subscription payments' });
+      console.error('Create dealer subscription error:', error);
+      return sendError(reply, 'Failed to create subscription session', 500);
     }
   });
 
-  // Get payments by customer reference (survives account deletion)
-  fastify.get('/customer/:reference_id', {
-    preHandler: [fastify.authenticate],
-  }, async (request, reply) => {
+  // Get payment history for authenticated user
+  fastify.get('/history', createRouteSchema({
+    tags: ['payments'],
+    summary: 'Get payment history',
+    description: 'Get payment history for authenticated buyer or dealer',
+    security: authRequired,
+    response: {
+      description: 'Payment history',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', enum: [true] },
+        data: {
+          type: 'object',
+          properties: {
+            account_type: { type: 'string', enum: ['buyer', 'dealer'] },
+            customer_reference_id: { type: 'string' },
+            total_payments: { type: 'integer' },
+            payments: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string', format: 'uuid' },
+                  transaction_type: { type: 'string', enum: ['verification', 'subscription'] },
+                  amount_cents: { type: 'integer' },
+                  status: { type: 'string' },
+                  payment_timestamp: { type: 'string', format: 'date-time' }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }), { preHandler: fastify.authenticate }, async (request, reply) => {
     try {
-      // TODO: Add admin check
-      const { reference_id } = request.params as { reference_id: string };
-      const { getPaymentsByCustomerReference } = await import('../services/supabase.js');
-      
-      const payments = await getPaymentsByCustomerReference(reference_id);
-      
-      return reply.send({
-        customer_reference_id: reference_id,
+      if (!request.user || !request.user.account_type) {
+        return sendError(reply, 'Account not found', 404);
+      }
+
+      const accountData = request.user.account_data;
+      let payments: Payment[];
+
+      // Get payments based on account type (using our database functions)
+      if (request.user.account_type === 'buyer') {
+        payments = await getBuyerPaymentHistory(accountData.id);
+      } else {
+        payments = await getDealerPaymentHistory(accountData.id);
+      }
+
+      // Format response following customerPaymentHistorySchema structure
+      const response = {
+        account_type: request.user.account_type,
+        customer_reference_id: accountData.buyer_reference_id || accountData.dealer_reference_id,
         total_payments: payments.length,
         payments: payments.map(p => ({
           id: p.id,
@@ -156,12 +211,67 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           amount_cents: p.amount_cents,
           status: p.status,
           payment_timestamp: p.payment_timestamp,
-          account_active: !!p.account_id // null if account deleted
+          account_active: true // Account is active since user is authenticated
         }))
-      });
+      };
+
+      return sendSuccess(reply, response, 200);
 
     } catch (error) {
-      return reply.status(500).send({ error: 'Failed to get customer payments' });
+      console.error('Get payment history error:', error);
+      return sendError(reply, 'Failed to get payment history', 500);
+    }
+  });
+
+  // Verify payment completion
+  fastify.post('/verify', createRouteSchema({
+    tags: ['payments'],
+    summary: 'Verify payment completion',
+    description: 'Verify payment session completion and update status',
+    security: authRequired,
+    body: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string' },
+        payment_id: { type: 'string', format: 'uuid' }
+      },
+      required: ['session_id', 'payment_id']
+    }
+  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+    try {
+      const { session_id, payment_id } = request.body as { session_id: string; payment_id: string };
+
+      // Verify payment with Stripe (mock)
+      let paymentVerified = false;
+      
+      if (request.user?.account_type === 'buyer') {
+        paymentVerified = await verifyBuyerPayment(session_id);
+      } else if (request.user?.account_type === 'dealer') {
+        paymentVerified = await verifyDealerSubscription(session_id);
+      }
+
+      if (paymentVerified) {
+        // Update payment status using our database function
+        await updatePaymentStatus(payment_id, 'succeeded', {
+          stripe_info: {
+            session_id,
+            verified_at: new Date().toISOString()
+          }
+        });
+
+        return sendSuccess(reply, {
+          payment_id,
+          status: 'succeeded',
+          verified_at: new Date().toISOString()
+        }, 200);
+      } else {
+        await updatePaymentStatus(payment_id, 'failed');
+        return sendError(reply, 'Payment verification failed', 400);
+      }
+
+    } catch (error) {
+      console.error('Verify payment error:', error);
+      return sendError(reply, 'Failed to verify payment', 500);
     }
   });
 }

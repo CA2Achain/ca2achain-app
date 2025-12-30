@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
+import swagger from '@fastify/swagger';
+import swaggerUi from '@fastify/swagger-ui';
 import dotenv from 'dotenv';
 import { authMiddleware } from './middleware/auth.js';
 import { apiKeyMiddleware } from './middleware/apikey.js';
@@ -8,6 +10,7 @@ import { initSupabase } from './services/database/connection.js';
 import { initStripe } from './services/service-resolver.js';
 import { initResend } from './services/email.js';
 import { logServiceStatus } from './services/service-resolver.js';
+import { swaggerOptions, swaggerUiOptions } from './config/swagger.js';
 
 import authRoutes from './routes/auth.js';
 import buyerRoutes from './routes/buyer.js';
@@ -33,6 +36,10 @@ initResend();
 
 // Log which services are real vs mocked
 logServiceStatus();
+
+// Register Swagger for API documentation
+await fastify.register(swagger, swaggerOptions);
+await fastify.register(swaggerUi, swaggerUiOptions);
 
 // Security middleware
 await fastify.register(helmet);

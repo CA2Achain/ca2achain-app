@@ -1,431 +1,353 @@
 import { FastifyInstance } from 'fastify';
-import { verificationRequestSchema, createStandardComplianceRequirements } from '@ca2achain/shared';
+import { createRouteSchema, sendSuccess, sendError, sendValidationError, sendInsufficientCredits, apiKeyRequired } from '../utils/api-responses.js';
+import { getBuyerByAuth } from '../services/database/buyer-accounts.js';
+import { getBuyerSecrets } from '../services/database/buyer-secrets.js';
+import { createComplianceEvent, getComplianceEventById, getDealerVerificationHistory } from '../services/database/compliance-events.js';
+import { decryptPersonaData, decryptPrivadoCredential, extractHashReproducibilityData, generateCommitmentHash, normalizeAddress } from '../services/encryption.js';
 import { 
-  getBuyerByEmail, 
-  getBuyerSecrets,
-  getDealerByApiKeyHash,
-  createComplianceEvent,
-  updateComplianceEventBlockchain,
-  incrementDealerQueryCount
-} from '../services/supabase.js';
-import { decryptPersonaData, decryptPrivadoCredential, hashApiKey } from '../services/encryption.js';
-import { 
-  generateAgeProof, 
-  generateAddressProof, 
-  verifyZKProof,
-  createComplianceRecord,
-  storeComplianceRecordOnChain,
-  extractAgeVerificationResult,
-  extractAddressVerificationResult,
-  deserializeCredential 
-} from '../services/polygonid.js';
+  verificationRequestSchema, 
+  verificationResponseSchema,
+  complianceHistoryRequestSchema,
+  type VerificationRequest,
+  type VerificationResponse 
+} from '@ca2achain/shared';
 
 export default async function verificationRoutes(fastify: FastifyInstance) {
-  
-  // Core AB 1263 verification endpoint for dealers
-  fastify.post('/verify', {
-    preHandler: [fastify.authenticateApiKey],
-  }, async (request, reply) => {
+  // Main dealer API - Verify buyer age and address
+  fastify.post('/verify', createRouteSchema({
+    tags: ['verification'],
+    summary: 'Verify buyer age and address',
+    description: 'Verify buyer age (18+) and address using zero-knowledge proofs. Costs 1 credit per request.',
+    security: apiKeyRequired,
+    body: {
+      type: 'object',
+      properties: {
+        buyer_email: { 
+          type: 'string', 
+          format: 'email',
+          description: 'Email address of the buyer to verify'
+        },
+        shipping_address: { 
+          type: 'string',
+          description: 'Shipping address as a string for verification'
+        },
+        ab1263_compliance_completed: { 
+          type: 'boolean',
+          enum: [true],
+          description: 'Must be true to confirm AB 1263 compliance completed'
+        }
+      },
+      required: ['buyer_email', 'shipping_address', 'ab1263_compliance_completed']
+    },
+    response: {
+      description: 'Verification completed successfully',
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', enum: [true] },
+              data: {
+                type: 'object',
+                properties: {
+                  buyer_email: { type: 'string', format: 'email' },
+                  age_verified: { type: 'boolean' },
+                  address_verified: { type: 'boolean' },
+                  address_match_confidence: { type: 'number', minimum: 0, maximum: 1 },
+                  normalized_address_used: { type: 'string' },
+                  verified_at: { type: 'string', format: 'date-time' },
+                  compliance_event_id: { type: 'string', format: 'uuid' },
+                  zkp_proofs: {
+                    type: 'object',
+                    properties: {
+                      age_proof_hash: { type: 'string' },
+                      address_proof_hash: { type: 'string' }
+                    }
+                  },
+                  message: { type: 'string' }
+                },
+                required: ['buyer_email', 'age_verified', 'address_verified', 'address_match_confidence', 'verified_at', 'compliance_event_id']
+              }
+            }
+          }
+        }
+      }
+    }
+  }), { preHandler: fastify.authenticateApiKey }, async (request, reply) => {
     try {
-      const verificationData = verificationRequestSchema.parse(request.body);
+      const verificationRequest = verificationRequestSchema.parse(request.body) as VerificationRequest;
       const dealer = request.dealer!; // Set by API key middleware
 
-      // Validate AB 1263 compliance requirements
-      if (!verificationData.ab1263_disclosure_presented) {
-        return reply.status(400).send({ 
-          success: false,
-          error: 'AB 1263 disclosure must be presented to buyer' 
-        });
+      // Find buyer by email (through auth.users)
+      const supabase = require('../services/database/connection.js').getClient();
+      const { data: authUser, error: authError } = await supabase.auth.admin.getUserByEmail(verificationRequest.buyer_email);
+      
+      if (authError || !authUser.user) {
+        return sendError(reply, 'Buyer not found', 404, 'No buyer account found with this email');
       }
 
-      if (!verificationData.acknowledgment_received) {
-        return reply.status(400).send({ 
-          success: false,
-          error: 'Buyer acknowledgment required for AB 1263 compliance' 
-        });
-      }
-
-      // Check dealer query limits
-      if (dealer.queries_used_this_month >= dealer.monthly_query_limit) {
-        return reply.status(429).send({
-          success: false,
-          error: 'Monthly query limit exceeded',
-          queries_used: dealer.queries_used_this_month,
-          query_limit: dealer.monthly_query_limit,
-        });
-      }
-
-      // Get buyer by email
-      const buyer = await getBuyerByEmail(verificationData.buyer_email);
+      // Get buyer account
+      const buyer = await getBuyerByAuth(authUser.user.id);
       if (!buyer) {
-        // Increment query count even for failed requests
-        await incrementDealerQueryCount(dealer.id);
-        
-        return reply.status(404).send({ 
-          success: false,
-          verification_result: 'FAIL',
-          age_verified: false,
-          address_verified: false,
-          confidence_score: 0,
-          timestamp: new Date().toISOString(),
-          error: 'Buyer not found',
-          message: 'Buyer must register and complete identity verification first',
-          compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
-        });
+        return sendError(reply, 'Buyer account not found', 404);
       }
 
       // Check if buyer is verified
       if (buyer.verification_status !== 'verified') {
-        await incrementDealerQueryCount(dealer.id);
-        
-        return reply.status(400).send({ 
-          success: false,
-          verification_result: 'FAIL',
-          age_verified: false,
-          address_verified: false,
-          confidence_score: 0,
-          timestamp: new Date().toISOString(),
-          error: 'Buyer not verified',
-          verification_status: buyer.verification_status,
-          compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
-        });
+        return sendError(reply, 'Buyer not verified', 400, 'Buyer has not completed identity verification');
       }
 
-      // Check if verification has expired
-      const isExpired = buyer.verification_expires_at 
-        ? new Date(buyer.verification_expires_at) < new Date()
-        : false;
-
-      if (isExpired) {
-        await incrementDealerQueryCount(dealer.id);
-        
-        return reply.status(400).send({ 
-          success: false,
-          verification_result: 'FAIL',
-          age_verified: false,
-          address_verified: false,
-          confidence_score: 0,
-          timestamp: new Date().toISOString(),
-          error: 'Buyer verification expired',
-          expired_at: buyer.verification_expires_at,
-          message: 'Buyer needs to re-verify with updated ID',
-          compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
-        });
+      // Get encrypted buyer secrets for ZKP extraction
+      const buyerSecrets = await getBuyerSecrets(buyer.id);
+      if (!buyerSecrets) {
+        return sendError(reply, 'Buyer secrets not found', 404, 'Buyer verification data not available');
       }
 
-      // Get encrypted buyer secrets
-      const secrets = await getBuyerSecrets(buyer.id);
-      if (!secrets) {
-        await incrementDealerQueryCount(dealer.id);
-        
-        return reply.status(404).send({ 
-          success: false,
-          verification_result: 'FAIL',
-          age_verified: false,
-          address_verified: false,
-          confidence_score: 0,
-          timestamp: new Date().toISOString(),
-          error: 'Buyer data not found',
-          compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
-        });
-      }
+      // Decrypt buyer secrets temporarily for verification
+      const decryptedPersonaData = decryptPersonaData(buyerSecrets.encrypted_persona_data);
+      const decryptedPrivadoCredential = decryptPrivadoCredential(buyerSecrets.encrypted_privado_credential);
 
-      // Decrypt data for verification
-      const personaData = decryptPersonaData(secrets.encrypted_persona_data);
-      const privadoCredential = decryptPrivadoCredential(secrets.encrypted_privado_credential);
-
-      // Generate verification ID for this specific verification
-      const verificationId = `VER-${Date.now().toString(36).toUpperCase()}`;
-
-      // Generate ZK proofs
-      const ageProof = await generateAgeProof(privadoCredential, 18); // AB 1263 requires 18+
-      const addressProof = await generateAddressProof(privadoCredential, verificationData.shipping_address);
-
-      // Verify proofs are valid
-      const ageValid = await verifyZKProof(ageProof);
-      const addressValid = await verifyZKProof(addressProof);
-
-      if (!ageValid || !addressValid) {
-        await incrementDealerQueryCount(dealer.id);
-        
-        return reply.status(500).send({ 
-          success: false,
-          verification_result: 'FAIL',
-          age_verified: false,
-          address_verified: false,
-          confidence_score: 0,
-          timestamp: new Date().toISOString(),
-          error: 'Proof verification failed',
-          compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
-        });
-      }
-
-      // Extract verification results from proofs using clean boolean helpers
-      const ageResult = extractAgeVerificationResult(ageProof);
-      const addressResult = extractAddressVerificationResult(addressProof);
-      
-      const ageVerified = ageResult.isOver18;
-      const addressVerified = addressResult.addressMatches;
-
-      // Calculate overall verification result
-      const verificationResult = ageVerified && addressVerified ? 'PASS' : 'FAIL';
-      
-      // Calculate confidence score based on various factors
-      let confidenceScore = 0;
-      if (ageVerified) confidenceScore += 50;
-      if (addressVerified) confidenceScore += 40;
-      if (personaData.dl_number) confidenceScore += 10; // Valid DL adds confidence
-      
-      // Create compliance record for blockchain storage
-      const complianceRecord = createComplianceRecord(
-        verificationId,
-        ageProof,
-        addressProof,
-        dealer.id,
-        verificationData.transaction_id
+      // Extract hash reproducibility data
+      const complianceEventId = require('crypto').randomUUID();
+      const hashData = extractHashReproducibilityData(
+        buyer.id,
+        buyer.buyer_reference_id,
+        decryptedPersonaData,
+        decryptedPrivadoCredential,
+        complianceEventId
       );
 
-      // Generate compliance requirements for dealer
-      const complianceRequirements = createStandardComplianceRequirements(
-        verificationResult,
-        ageVerified,
-        addressVerified
-      );
+      // Normalize shipping address for comparison
+      // Parse address string into structured format (simplified)
+      const normalizedShippingAddress = verificationRequest.shipping_address.toUpperCase().trim();
+      const normalizedBuyerAddress = hashData.normalized_buyer_address;
 
-      // Store compliance event in database
-      const complianceEvent = await createComplianceEvent({
-        verification_id: verificationId,
-        buyer_id: buyer.id,
-        dealer_id: dealer.id,
-        dealer_request: {
-          buyer_email: verificationData.buyer_email,
-          buyer_dob: verificationData.buyer_dob,
-          shipping_address: verificationData.shipping_address,
-          transaction_id: verificationData.transaction_id,
-          ab1263_disclosure_presented: verificationData.ab1263_disclosure_presented,
-          acknowledgment_received: verificationData.acknowledgment_received,
+      // Calculate address match confidence (simplified string similarity)
+      const addressMatch = normalizedBuyerAddress.includes(normalizedShippingAddress) || 
+                          normalizedShippingAddress.includes(normalizedBuyerAddress);
+      const addressMatchConfidence = addressMatch ? 0.95 : 0.1;
+
+      // Verification results
+      const ageVerified = hashData.age_verified;
+      const addressVerified = addressMatchConfidence > 0.8;
+
+      // Create verification data following verificationDataSchema structure
+      const verificationData = {
+        compliance_event: {
+          version: "AB1263-2026.1",
+          compliance_event_id: complianceEventId,
           timestamp: new Date().toISOString(),
+          buyer_reference: buyer.buyer_reference_id,
+          dealer_reference: dealer.dealer_reference_id
         },
-        verification_response: {
-          age_verified: ageVerified,
-          address_verified: addressVerified,
-          confidence_score: confidenceScore,
-          compliance_requirements: complianceRequirements,
-        },
-        zkp_proofs: {
-          age_verification: {
-            proof: ageProof.proof,
-            public_signals: ageProof.public_signals,
+        zkp_verifications: {
+          age_check: {
+            zkp_age_proof: hashData.zkp_age_proof,
+            buyer_secret: hashData.buyer_secret,
+            date_of_birth: hashData.date_of_birth,
+            age_verified: ageVerified,
+            verified_at_timestamp: new Date().toISOString(),
+            commitment_hash: generateCommitmentHash({
+              zkp_age_proof: hashData.zkp_age_proof,
+              buyer_reference: buyer.buyer_reference_id,
+              buyer_secret: hashData.buyer_secret,
+              date_of_birth: hashData.date_of_birth,
+              age_verified: ageVerified,
+              verified_at_timestamp: new Date().toISOString()
+            })
           },
           address_verification: {
-            proof: addressProof.proof,
-            public_signals: addressProof.public_signals,
-          },
+            zkp_address_proof: hashData.zkp_address_proof,
+            normalized_buyer_address: normalizedBuyerAddress,
+            normalized_shipping_address: normalizedShippingAddress,
+            match_confidence: addressMatchConfidence,
+            address_match_verified: addressVerified,
+            verified_at_timestamp: new Date().toISOString(),
+            commitment_hash: generateCommitmentHash({
+              zkp_address_proof: hashData.zkp_address_proof,
+              normalized_buyer_address: normalizedBuyerAddress,
+              normalized_shipping_address: normalizedShippingAddress,
+              match_confidence: addressMatchConfidence,
+              address_match_verified: addressVerified,
+              verified_at_timestamp: new Date().toISOString()
+            })
+          }
         },
-        blockchain_status: 'pending',
-      });
-
-      // 🛡️ CRITICAL: Store immutable record on Polygon blockchain
-      try {
-        const blockchainTx = await storeComplianceRecordOnChain(complianceRecord);
-        
-        // Update database with blockchain transaction hash
-        await updateComplianceEventBlockchain(verificationId, {
-          blockchain_tx_hash: blockchainTx.hash,
-          blockchain_status: 'confirmed',
-          blockchain_timestamp: new Date().toISOString(),
-        });
-        
-        console.log(`🔗 Compliance record stored on blockchain: ${blockchainTx.hash}`);
-      } catch (blockchainError) {
-        console.error('⚠️ Blockchain storage failed:', blockchainError);
-        // Still allow verification to proceed, but log the issue
-        await updateComplianceEventBlockchain(verificationId, {
-          blockchain_status: 'failed',
-          blockchain_error: blockchainError.message,
-        });
-      }
-
-      // Increment dealer query count
-      await incrementDealerQueryCount(dealer.id);
-
-      // Return verification result with compliance requirements
-      return reply.send({
-        success: true,
-        verification_id: verificationId,
-        verification_result: verificationResult,
-        age_verified: ageVerified,
-        address_verified: addressVerified,
-        confidence_score: confidenceScore,
-        timestamp: new Date().toISOString(),
-        ab1263_compliance: {
-          disclosure_presented: verificationData.ab1263_disclosure_presented,
-          acknowledgment_received: verificationData.acknowledgment_received,
-          compliance_version: 'AB1263-2026.1',
-        },
-        compliance_requirements: complianceRequirements,
-        message: verificationResult === 'PASS' 
-          ? 'Buyer verified for age and address compliance - follow mandatory shipping requirements'
-          : 'Buyer verification failed - do not proceed with shipment',
-      });
-
-    } catch (error) {
-      request.log.error(error);
-      
-      // Still increment query count on errors to prevent abuse
-      if (request.dealer) {
-        await incrementDealerQueryCount(request.dealer.id);
-      }
-      
-      return reply.status(500).send({ 
-        success: false,
-        verification_result: 'FAIL',
-        age_verified: false,
-        address_verified: false,
-        confidence_score: 0,
-        timestamp: new Date().toISOString(),
-        error: 'Internal server error',
-        compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
-      });
-    }
-  });
-
-  // Batch verification endpoint (for high-volume dealers)
-  fastify.post('/verify-batch', {
-    preHandler: [fastify.authenticateApiKey],
-  }, async (request, reply) => {
-    try {
-      const { verifications } = request.body as {
-        verifications: Array<{
-          buyer_email: string;
-          buyer_dob: string;
-          shipping_address: string;
-          transaction_id: string;
-          ab1263_disclosure_presented: boolean;
-          acknowledgment_received: boolean;
-        }>;
+        legal_attestation: {
+          notice_version: "CA-DOJ-2026-V1",
+          ab1263_dealer_received_buyer_acceptance: verificationRequest.ab1263_compliance_completed,
+          verification_timestamp: new Date().toISOString(),
+          attestation_hash: generateCommitmentHash({
+            dealer_reference: dealer.dealer_reference_id,
+            ab1263_compliance: verificationRequest.ab1263_compliance_completed,
+            verification_timestamp: new Date().toISOString()
+          }),
+          transaction_link_hash: generateCommitmentHash({
+            compliance_event_id: complianceEventId,
+            dealer_reference: dealer.dealer_reference_id,
+            buyer_reference: buyer.buyer_reference_id,
+            verification_timestamp: new Date().toISOString()
+          })
+        }
       };
 
-      if (!Array.isArray(verifications) || verifications.length === 0) {
-        return reply.status(400).send({ 
-          success: false,
-          error: 'Invalid batch request - must provide array of verifications' 
-        });
-      }
-
-      if (verifications.length > 50) { // Reduced batch size for security
-        return reply.status(400).send({ 
-          success: false,
-          error: 'Batch size limited to 50 verifications' 
-        });
-      }
-
-      const dealer = request.dealer!;
-
-      // Check if dealer has enough queries remaining
-      const queriesNeeded = verifications.length;
-      const queriesRemaining = dealer.monthly_query_limit - dealer.queries_used_this_month;
-      
-      if (queriesNeeded > queriesRemaining) {
-        return reply.status(429).send({
-          success: false,
-          error: 'Insufficient query quota for batch request',
-          queries_needed: queriesNeeded,
-          queries_remaining: queriesRemaining,
-        });
-      }
-
-      const results = [];
-
-      for (const verification of verifications) {
-        try {
-          // Validate each verification request
-          const verificationData = verificationRequestSchema.parse(verification);
-          
-          // Perform same verification logic as single endpoint
-          // (Implementation would be similar to above, but condensed)
-          
-          // For brevity, returning simplified results here
-          // In production, each would go through full verification flow
-          
-          results.push({
-            transaction_id: verificationData.transaction_id,
-            buyer_email: verificationData.buyer_email,
-            verification_result: 'PASS', // Placeholder
-            verification_id: `VER-${Date.now().toString(36).toUpperCase()}`,
-            age_verified: true,
-            address_verified: true,
-            confidence_score: 90,
-            timestamp: new Date().toISOString(),
-            compliance_requirements: createStandardComplianceRequirements('PASS', true, true),
-          });
-
-          // Increment query count for each verification
-          await incrementDealerQueryCount(dealer.id);
-
-        } catch (verificationError) {
-          results.push({
-            transaction_id: verification.transaction_id || 'unknown',
-            buyer_email: verification.buyer_email,
-            verification_result: 'FAIL',
-            age_verified: false,
-            address_verified: false,
-            confidence_score: 0,
-            error: 'Verification processing failed',
-            timestamp: new Date().toISOString(),
-            compliance_requirements: createStandardComplianceRequirements('FAIL', false, false),
-          });
-          
-          // Still count failed verifications against quota
-          await incrementDealerQueryCount(dealer.id);
+      // Create compliance event (follows our database function signature)
+      const complianceEvent = await createComplianceEvent({
+        buyer_id: buyer.id,
+        dealer_id: dealer.id,
+        buyer_reference_id: buyer.buyer_reference_id,
+        dealer_reference_id: dealer.dealer_reference_id,
+        verification_data: verificationData,
+        age_verified: ageVerified,
+        address_verified: addressVerified,
+        blockchain_info: {
+          network: 'polygon-mainnet',
+          transaction_hash: undefined, // Would be set by blockchain service
+          contract_address: undefined,
+          event_index: undefined,
+          block_number: undefined
         }
-      }
-
-      return reply.send({
-        success: true,
-        batch_id: `BATCH-${Date.now().toString(36).toUpperCase()}`,
-        total_verifications: verifications.length,
-        results: results,
-        timestamp: new Date().toISOString(),
       });
+
+      // Format response following verificationResponseSchema
+      const verificationResponse: VerificationResponse = {
+        buyer_email: verificationRequest.buyer_email,
+        age_verified: ageVerified,
+        address_verified: addressVerified,
+        address_match_confidence: addressMatchConfidence,
+        normalized_address_used: normalizedBuyerAddress,
+        verified_at: new Date().toISOString(),
+        compliance_event_id: complianceEvent.id,
+        message: ageVerified && addressVerified ? 'Verification successful' : 'Verification completed with limitations',
+        zkp_proofs: {
+          age_proof_hash: verificationData.zkp_verifications.age_check.commitment_hash,
+          address_proof_hash: verificationData.zkp_verifications.address_verification.commitment_hash
+        }
+      };
+
+      return sendSuccess(reply, verificationResponse, 200);
 
     } catch (error) {
-      request.log.error(error);
-      return reply.status(500).send({ 
-        success: false,
-        error: 'Batch verification failed' 
-      });
+      console.error('Verification error:', error);
+      if (error instanceof Error && error.name === 'ZodError') {
+        return sendValidationError(reply, 'Invalid verification request data');
+      }
+      return sendError(reply, 'Verification failed', 500);
     }
   });
 
-  // Get verification status by verification ID (for audit trails)
-  fastify.get('/status/:verification_id', {
-    preHandler: [fastify.authenticateApiKey],
-  }, async (request, reply) => {
+  // Get verification details by ID
+  fastify.get('/verify/:verification_id', createRouteSchema({
+    tags: ['verification'],
+    summary: 'Get verification details',
+    description: 'Retrieve details of a specific verification by compliance event ID',
+    security: apiKeyRequired,
+    params: {
+      type: 'object',
+      properties: {
+        verification_id: {
+          type: 'string',
+          format: 'uuid',
+          description: 'Compliance event ID to retrieve'
+        }
+      },
+      required: ['verification_id']
+    }
+  }), { preHandler: fastify.authenticateApiKey }, async (request, reply) => {
     try {
       const { verification_id } = request.params as { verification_id: string };
       const dealer = request.dealer!;
 
-      // TODO: Implement getComplianceEventByVerificationId in supabase service
-      // const complianceEvent = await getComplianceEventByVerificationId(verification_id);
+      // Get compliance event (follows our database function)
+      const complianceEvent = await getComplianceEventById(verification_id);
       
-      // For now, return placeholder
-      return reply.send({
-        success: true,
-        verification_id: verification_id,
-        status: 'completed',
-        verification_result: 'PASS',
-        timestamp: new Date().toISOString(),
-        blockchain_status: 'confirmed',
-        compliance_requirements: createStandardComplianceRequirements('PASS', true, true),
-      });
+      if (!complianceEvent) {
+        return sendError(reply, 'Verification not found', 404);
+      }
+
+      // Verify dealer has access to this verification
+      if (complianceEvent.dealer_id !== dealer.id) {
+        return sendError(reply, 'Access denied', 403, 'This verification does not belong to your account');
+      }
+
+      // Format response following our database schema
+      const response = {
+        compliance_event_id: complianceEvent.id,
+        buyer_reference_id: complianceEvent.buyer_reference_id,
+        dealer_reference_id: complianceEvent.dealer_reference_id,
+        age_verified: complianceEvent.age_verified,
+        address_verified: complianceEvent.address_verified,
+        verified_at: complianceEvent.verified_at,
+        verification_data: complianceEvent.verification_data,
+        blockchain_info: complianceEvent.blockchain_info
+      };
+
+      return sendSuccess(reply, response, 200);
 
     } catch (error) {
-      request.log.error(error);
-      return reply.status(500).send({ 
-        success: false,
-        error: 'Failed to get verification status' 
-      });
+      console.error('Get verification details error:', error);
+      return sendError(reply, 'Failed to get verification details', 500);
+    }
+  });
+
+  // Get dealer verification history (follows our database function)
+  fastify.get('/history', createRouteSchema({
+    tags: ['verification'],
+    summary: 'Get verification history',
+    description: 'Retrieve dealer verification history with optional pagination',
+    security: apiKeyRequired,
+    querystring: {
+      type: 'object',
+      properties: {
+        limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
+        offset: { type: 'integer', minimum: 0, default: 0 },
+        start_date: { type: 'string', format: 'date-time' },
+        end_date: { type: 'string', format: 'date-time' }
+      }
+    }
+  }), { preHandler: fastify.authenticateApiKey }, async (request, reply) => {
+    try {
+      const dealer = request.dealer!;
+      
+      // Get dealer verification history (uses our existing database function)
+      const history = await getDealerVerificationHistory(dealer.id);
+
+      // Apply query filters if provided
+      const query = request.query as any;
+      let filteredHistory = history;
+
+      if (query.start_date) {
+        filteredHistory = filteredHistory.filter(event => 
+          new Date(event.verified_at) >= new Date(query.start_date)
+        );
+      }
+
+      if (query.end_date) {
+        filteredHistory = filteredHistory.filter(event => 
+          new Date(event.verified_at) <= new Date(query.end_date)
+        );
+      }
+
+      // Apply pagination
+      const offset = query.offset || 0;
+      const limit = query.limit || 50;
+      const paginatedHistory = filteredHistory.slice(offset, offset + limit);
+
+      const response = {
+        verifications: paginatedHistory,
+        pagination: {
+          offset,
+          limit,
+          total: filteredHistory.length,
+          has_more: offset + limit < filteredHistory.length
+        }
+      };
+
+      return sendSuccess(reply, response, 200);
+
+    } catch (error) {
+      console.error('Get verification history error:', error);
+      return sendError(reply, 'Failed to get verification history', 500);
     }
   });
 }
