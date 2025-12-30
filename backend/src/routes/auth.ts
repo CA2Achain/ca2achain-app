@@ -1,6 +1,5 @@
 import { FastifyInstance } from 'fastify';
 import { sendMagicLink, getUserFromToken, ensureAuthAccountExists } from '../services/auth.js';
-import { getAuthAccountByEmail, createAuthAccount } from '../services/supabase.js';
 import { authLoginSchema, type AuthLogin, type AuthMeResponse } from '@ca2achain/shared';
 
 export default async function authRoutes(fastify: FastifyInstance) {

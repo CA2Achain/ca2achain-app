@@ -1,4 +1,6 @@
-import { getSupabase, createAuthAccount, getAuthAccountByEmail } from './supabase.js';
+import { getClient } from './database/connection.js';
+import { getBuyerByAuth } from './database/buyer-accounts.js';
+import { getDealerByAuth } from './database/dealer-accounts.js';
 
 // Send magic link for passwordless login
 export const sendMagicLink = async (
@@ -6,7 +8,7 @@ export const sendMagicLink = async (
   accountType?: 'buyer' | 'dealer',
   redirectTo?: string
 ) => {
-  const supabase = getSupabase();
+  const supabase = getClient();
   
   // Set user metadata for new users
   const options = accountType ? {
@@ -25,9 +27,9 @@ export const sendMagicLink = async (
   return data;
 };
 
-// Verify OTP token and ensure auth_account exists
+// Verify OTP token
 export const verifyOtp = async (email: string, token: string) => {
-  const supabase = getSupabase();
+  const supabase = getClient();
   
   const { data, error } = await supabase.auth.verifyOtp({
     email,
@@ -36,60 +38,70 @@ export const verifyOtp = async (email: string, token: string) => {
   });
 
   if (error) throw error;
-  
-  // Ensure auth_account record exists
-  if (data.user) {
-    await ensureAuthAccountExists(data.user);
-  }
-  
   return data;
 };
 
-// Ensure auth_account record exists for Supabase Auth user
-export const ensureAuthAccountExists = async (supabaseUser: any) => {
-  let authAccount = await getAuthAccountByEmail(supabaseUser.email);
-  
-  if (!authAccount) {
-    // Create auth_account record
-    const accountType = supabaseUser.user_metadata?.account_type || 'buyer';
-    
-    authAccount = await createAuthAccount({
-      id: supabaseUser.id,
-      email: supabaseUser.email,
-      account_type: accountType
-    });
-  }
-  
-  return authAccount;
-};
-
-// Get current user from token
+// Get user from JWT token and include account data
 export const getUserFromToken = async (accessToken: string) => {
-  const supabase = getSupabase();
+  const supabase = getClient();
   
   const { data: { user }, error } = await supabase.auth.getUser(accessToken);
   
   if (error) throw error;
   if (!user) throw new Error('User not found');
   
-  // Get auth_account record
-  const authAccount = await getAuthAccountByEmail(user.email!);
-  if (!authAccount) {
-    throw new Error('Auth account not found');
+  // Try to find buyer account first
+  let accountData = await getBuyerByAuth(user.id);
+  if (accountData) {
+    return {
+      supabaseUser: user,
+      accountType: 'buyer' as const,
+      account: accountData
+    };
   }
   
-  return { supabaseUser: user, authAccount };
+  // Try dealer account
+  accountData = await getDealerByAuth(user.id);
+  if (accountData) {
+    return {
+      supabaseUser: user,
+      accountType: 'dealer' as const,
+      account: accountData
+    };
+  }
+  
+  // User exists in auth but no account created yet
+  return {
+    supabaseUser: user,
+    accountType: null,
+    account: null
+  };
+};
+
+// Ensure auth account exists (simplified - accounts link to auth.users directly)
+export const ensureAuthAccountExists = async (supabaseUser: any) => {
+  // In our new structure, buyer/dealer accounts are created separately
+  // and link to auth.users via auth_id foreign key
+  // This function just returns the auth user info
+  return {
+    id: supabaseUser.id,
+    email: supabaseUser.email,
+    email_confirmed: supabaseUser.email_confirmed_at !== null,
+    account_type: supabaseUser.user_metadata?.account_type || null
+  };
 };
 
 // Sign out
-export const signOut = async (accessToken: string) => {
-  const { error } = await getSupabase().auth.admin.signOut(accessToken);
+export const signOut = async () => {
+  const supabase = getClient();
+  const { error } = await supabase.auth.signOut();
   if (error) throw error;
 };
 
 // Update user metadata
 export const updateUserMetadata = async (userId: string, metadata: Record<string, any>) => {
-  const { data, error } = await getSupabase().auth.admin.updateUserById(userId, {
+  const supabase = getClient();
+  const { data, error } = await supabase.auth.admin.updateUserById(userId, {
     user_metadata: metadata,
   });
 
@@ -97,8 +109,9 @@ export const updateUserMetadata = async (userId: string, metadata: Record<string
   return data;
 };
 
-// Delete user (cascades to auth_accounts)
+// Delete user (cascades to buyer/dealer accounts via foreign key)
 export const deleteUser = async (userId: string) => {
-  const { error } = await getSupabase().auth.admin.deleteUser(userId);
+  const supabase = getClient();
+  const { error } = await supabase.auth.admin.deleteUser(userId);
   if (error) throw error;
 };

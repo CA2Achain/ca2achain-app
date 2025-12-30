@@ -1,17 +1,12 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { getDealerByApiKeyHash } from '../services/supabase.js';
+import { getDealerByApiKey, useDealerCredit } from '../services/database/dealer-accounts.js';
 import { hashApiKey } from '../services/encryption.js';
+import type { DealerAccount } from '@ca2achain/shared';
 
 // Extend FastifyRequest to include dealer
 declare module 'fastify' {
   interface FastifyRequest {
-    dealer?: {
-      id: string;
-      company_name: string;
-      monthly_query_limit: number;
-      queries_used_this_month: number;
-      subscription_status: 'active' | 'past_due' | 'canceled' | 'trialing';
-    };
+    dealer?: DealerAccount;
   }
 }
 
@@ -45,7 +40,7 @@ export async function apiKeyMiddleware(
     const apiKeyHash = hashApiKey(apiKey);
 
     // Look up dealer by API key hash
-    const dealer = await getDealerByApiKeyHash(apiKeyHash);
+    const dealer = await getDealerByApiKey(apiKeyHash);
 
     if (!dealer) {
       return reply.status(401).send({ 
@@ -65,31 +60,41 @@ export async function apiKeyMiddleware(
       });
     }
 
-    // Check if dealer has exceeded query limit
-    if (dealer.queries_used_this_month >= dealer.monthly_query_limit) {
-      return reply.status(429).send({ 
+    // Check credit availability (new credit system)
+    const availableCredits = (dealer.credits_purchased + dealer.additional_credits_purchased) - dealer.credits_used;
+    const creditsExpired = dealer.credits_expire_at && new Date(dealer.credits_expire_at) < new Date();
+
+    if (availableCredits <= 0 || creditsExpired) {
+      return reply.status(402).send({ 
         success: false,
-        error: 'Monthly query limit exceeded',
-        queries_used: dealer.queries_used_this_month,
-        query_limit: dealer.monthly_query_limit,
-        message: 'Upgrade your plan or wait for next billing cycle'
+        error: 'Insufficient credits',
+        message: 'No verification credits available. Please purchase additional credits.',
+        credits_available: Math.max(0, availableCredits),
+        credits_expired: creditsExpired
       });
     }
 
-    // Attach dealer to request for use in routes
-    request.dealer = {
-      id: dealer.id,
-      company_name: dealer.company_name,
-      monthly_query_limit: dealer.monthly_query_limit,
-      queries_used_this_month: dealer.queries_used_this_month,
-      subscription_status: dealer.subscription_status,
-    };
+    // For verification endpoints, consume a credit atomically
+    if (request.url.includes('/verify') && request.method === 'POST') {
+      const creditUsed = await useDealerCredit(dealer.id);
+      if (!creditUsed) {
+        return reply.status(402).send({ 
+          success: false,
+          error: 'Credit consumption failed',
+          message: 'Unable to deduct verification credit. Please try again.'
+        });
+      }
+    }
+
+    // Attach full dealer account to request
+    request.dealer = dealer;
 
     // Log API usage for monitoring
-    request.log.info(`API request from dealer: ${dealer.company_name} (${dealer.queries_used_this_month}/${dealer.monthly_query_limit} queries used)`);
+    const remainingCredits = availableCredits - (request.url.includes('/verify') ? 1 : 0);
+    console.log(`API request from dealer: ${dealer.company_name} (${remainingCredits} credits remaining)`);
 
   } catch (error) {
-    request.log.error({ error }, 'API key middleware error');
+    console.error('API key middleware error:', error);
     return reply.status(500).send({ 
       success: false,
       error: 'Internal server error',

@@ -1,10 +1,13 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { getSupabase, getAuthAccountByEmail } from '../services/supabase.js';
+import { getClient } from '../services/database/connection.js';
+import { getBuyerByAuth } from '../services/database/buyer-accounts.js';
+import { getDealerByAuth } from '../services/database/dealer-accounts.js';
 
 export interface AuthUser {
   id: string;
   email: string;
-  account_type: 'buyer' | 'dealer';
+  account_type: 'buyer' | 'dealer' | null;
+  account_data: any; // Will be BuyerAccount or DealerAccount
 }
 
 // Extend FastifyRequest to include user
@@ -32,7 +35,8 @@ export async function authMiddleware(
     const token = authHeader.substring(7);
 
     // Verify JWT with Supabase
-    const { data: { user }, error } = await getSupabase().auth.getUser(token);
+    const supabase = getClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
 
     if (error || !user) {
       return reply.status(401).send({ 
@@ -41,28 +45,43 @@ export async function authMiddleware(
       });
     }
 
-    // Get our auth_account record to determine buyer vs dealer
-    const authAccount = await getAuthAccountByEmail(user.email!);
-    
-    if (!authAccount) {
-      return reply.status(401).send({ 
-        success: false,
-        error: 'Auth account not found' 
-      });
+    // Try to find buyer account first
+    let accountData = await getBuyerByAuth(user.id);
+    if (accountData) {
+      request.user = {
+        id: user.id,
+        email: user.email!,
+        account_type: 'buyer',
+        account_data: accountData
+      };
+      return;
     }
 
-    // Attach auth account info to request
+    // Try dealer account
+    accountData = await getDealerByAuth(user.id);
+    if (accountData) {
+      request.user = {
+        id: user.id,
+        email: user.email!,
+        account_type: 'dealer',
+        account_data: accountData
+      };
+      return;
+    }
+
+    // User exists in auth but no account created yet
     request.user = {
-      id: authAccount.id,
-      email: authAccount.email,
-      account_type: authAccount.account_type,
+      id: user.id,
+      email: user.email!,
+      account_type: null,
+      account_data: null
     };
 
   } catch (error) {
-    request.log.error({ error }, 'Auth middleware error');
-    return reply.status(401).send({ 
+    console.error('Auth middleware error:', error);
+    return reply.status(500).send({ 
       success: false,
-      error: 'Authentication failed' 
+      error: 'Authentication error' 
     });
   }
 }

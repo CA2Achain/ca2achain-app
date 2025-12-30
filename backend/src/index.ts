@@ -4,7 +4,7 @@ import helmet from '@fastify/helmet';
 import dotenv from 'dotenv';
 import { authMiddleware } from './middleware/auth.js';
 import { apiKeyMiddleware } from './middleware/apikey.js';
-import { initSupabase } from './services/supabase.js';
+import { initSupabase } from './services/database/connection.js';
 import { initStripe } from './services/service-resolver.js';
 import { initResend } from './services/email.js';
 import { logServiceStatus } from './services/service-resolver.js';
@@ -14,6 +14,7 @@ import buyerRoutes from './routes/buyer.js';
 import dealerRoutes from './routes/dealer.js';
 import verificationRoutes from './routes/verification.js';
 import webhookRoutes from './routes/webhooks.js';
+import paymentsRoutes from './routes/payments.js';
 
 dotenv.config();
 
@@ -108,6 +109,7 @@ await fastify.register(authRoutes, { prefix: '/api/auth' });
 await fastify.register(buyerRoutes, { prefix: '/api/buyer' });
 await fastify.register(dealerRoutes, { prefix: '/api/dealer' });
 await fastify.register(verificationRoutes, { prefix: '/api' });
+await fastify.register(paymentsRoutes, { prefix: '/api/payments' });
 await fastify.register(webhookRoutes, { prefix: '/webhooks' });
 
 const start = async () => {
