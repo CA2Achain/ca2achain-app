@@ -1,47 +1,52 @@
 import { z } from 'zod';
+import { 
+  envSchema,
+  addressSchema,
+  normalizedAddressSchema,
+  addressStringSchema,
+  phoneNumberSchema,
+  paymentStatusSchema,
+  creditCardInfoSchema,
+  stripeInfoSchema,
+  paymentInfoSchema,
+  paymentProviderInfoSchema
+} from './schema.js';
 
 // =============================================
-// BASIC STRUCTURES
+// BASIC STRUCTURE TYPES
 // =============================================
 
-// Address structure for consistent address handling
-export const addressSchema = z.object({
-  street: z.string().min(1, 'Street address is required'),
-  street_2: z.string().optional(), // Apartment, suite, unit number, etc.
-  city: z.string().min(1, 'City is required'),
-  state: z.string().min(2, 'State is required').max(2, 'State must be 2 characters'),
-  zip_code: z.string().regex(/^\d{5}(-\d{4})?$/, 'Valid ZIP code required'),
-  country: z.string().default('US'),
-});
+// Address types for consistent address handling
+export type Address = z.infer<typeof addressSchema>;
+export type NormalizedAddress = z.infer<typeof normalizedAddressSchema>;
+export type AddressString = z.infer<typeof addressStringSchema>;
 
-// Normalized address for comparison purposes
-export const normalizedAddressSchema = z.object({
-  street_normalized: z.string(), // Standardized street format
-  street_2_normalized: z.string().optional(), // Standardized apartment/suite format
-  city_normalized: z.string(), // Standardized city format
-  state: z.string().length(2), // Always 2-letter state code
-  zip_code: z.string().regex(/^\d{5}$/, 'ZIP code must be 5 digits'), // Always 5-digit ZIP
-  country: z.string().default('US'),
-});
-
-// Raw address string (for dealer API input)
-export const addressStringSchema = z.string().min(10, 'Complete address required');
+// Phone number type
+export type PhoneNumber = z.infer<typeof phoneNumberSchema>;
 
 // =============================================
-// ENVIRONMENT CONFIGURATION
+// PAYMENT DATA TYPES
 // =============================================
 
-export const envSchema = z.object({
-  PORT: z.string().default('3001'),
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  SUPABASE_URL: z.string().url(),
-  SUPABASE_ANON_KEY: z.string(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string(),
-  STRIPE_SECRET_KEY: z.string(),
-  STRIPE_WEBHOOK_SECRET: z.string(),
-  PERSONA_API_KEY: z.string(),
-  PERSONA_TEMPLATE_ID: z.string(),
-  RESEND_API_KEY: z.string(),
-  ENCRYPTION_KEY: z.string().min(32),
-  FRONTEND_URL: z.string().url().default('http://localhost:3000'),
-});
+// Payment status type (shared across modules)
+export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
+
+// Credit card and payment info types
+export type CreditCardInfo = z.infer<typeof creditCardInfoSchema>;
+export type StripeInfo = z.infer<typeof stripeInfoSchema>;
+export type PaymentInfo = z.infer<typeof paymentInfoSchema>;
+export type PaymentProviderInfo = z.infer<typeof paymentProviderInfoSchema>;
+
+// =============================================
+// ENVIRONMENT TYPES
+// =============================================
+
+// Inferred types from Zod schemas
+export type EnvSchema = z.infer<typeof envSchema>;
+
+// Environment validation result
+export interface EnvValidationResult {
+  success: boolean;
+  data?: EnvSchema;
+  errors?: string[];
+}

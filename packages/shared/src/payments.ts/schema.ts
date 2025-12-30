@@ -1,51 +1,47 @@
 import { z } from 'zod';
+import { paymentStatusSchema, paymentProviderInfoSchema } from '../common/schema.js';
 
-// Payment record schema with immutable customer reference
+// =============================================
+// PAYMENT SCHEMAS
+// =============================================
+
+// Main payments table schema (matches new database structure)
 export const paymentSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().uuid(), // UUIDv7 for chronological ordering
   
-  // Your core columns
-  account_id: z.string().uuid().nullable(), // NULL after CCPA deletion
+  // Specific account references (one will be null)
+  buyer_id: z.string().uuid().nullable(),
+  dealer_id: z.string().uuid().nullable(),
+  
+  // Payment details
   transaction_type: z.enum(['verification', 'subscription']),
-  amount_cents: z.number().int().positive(),
-  payment_timestamp: z.string().datetime(),
+  amount_cents: z.number().int(),
+  status: paymentStatusSchema, // Use common payment status enum
   
-  // Immutable customer reference (survives account deletion)
+  // Immutable customer reference (survives CCPA deletion)
   customer_reference_id: z.string(), // 'BUY_a8b9c2d1' or 'DLR_f3e4d5c6'
   
-  // Essential business fields
-  stripe_payment_intent_id: z.string(),
-  status: z.enum(['pending', 'succeeded', 'failed', 'refunded']),
+  // Payment provider info (generic)
+  payment_provider_info: paymentProviderInfoSchema,
   
+  payment_timestamp: z.string().datetime(),
   created_at: z.string().datetime(),
 });
 
-// Payment history response
-export const paymentHistorySchema = z.object({
-  account_type: z.enum(['buyer', 'dealer']),
-  payments: z.array(z.object({
-    id: z.string().uuid(),
-    customer_reference_id: z.string(),
-    transaction_type: z.enum(['verification', 'subscription']),
-    amount_cents: z.number().int(),
-    status: z.enum(['pending', 'succeeded', 'failed', 'refunded']),
-    payment_timestamp: z.string().datetime(),
-    created_at: z.string().datetime(),
-  }))
+// Payment creation request
+export const createPaymentSchema = z.object({
+  buyer_id: z.string().uuid().optional(),
+  dealer_id: z.string().uuid().optional(),
+  transaction_type: z.enum(['verification', 'subscription']),
+  amount_cents: z.number().int().positive(),
+  customer_reference_id: z.string(),
+  payment_provider_info: paymentProviderInfoSchema,
 });
 
-// Transaction type summary
-export const transactionTypeSummarySchema = z.object({
-  transaction_type: z.enum(['verification', 'subscription']),
-  total_payments: z.number().int(),
-  total_revenue_cents: z.number().int(),
-  payments: z.array(z.object({
-    id: z.string().uuid(),
-    customer_reference_id: z.string(),
-    amount_cents: z.number().int(),
-    status: z.enum(['pending', 'succeeded', 'failed', 'refunded']),
-    payment_timestamp: z.string().datetime(),
-  }))
+// Payment status update
+export const updatePaymentSchema = z.object({
+  status: paymentStatusSchema, // Use common payment status enum
+  payment_provider_info: paymentProviderInfoSchema,
 });
 
 // Customer payment history (survives account deletion)
@@ -56,7 +52,7 @@ export const customerPaymentHistorySchema = z.object({
     id: z.string().uuid(),
     transaction_type: z.enum(['verification', 'subscription']),
     amount_cents: z.number().int(),
-    status: z.enum(['pending', 'succeeded', 'failed', 'refunded']),
+    status: paymentStatusSchema, // Use common payment status enum
     payment_timestamp: z.string().datetime(),
     account_active: z.boolean(), // false if account was deleted
   }))

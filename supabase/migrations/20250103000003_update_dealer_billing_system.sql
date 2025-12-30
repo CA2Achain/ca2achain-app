@@ -82,8 +82,34 @@ ALTER TABLE buyer_accounts
 ADD COLUMN last_logged_in TIMESTAMPTZ;
 
 -- =============================================
--- STEP 5: UPDATE PAYMENTS TABLE (REMOVE STRIPE DEPENDENCY)
+-- STEP 5: UPDATE PAYMENTS TABLE (COMPLETE REDESIGN)
 -- =============================================
+
+-- Add specific account reference columns
+ALTER TABLE payments 
+ADD COLUMN buyer_id UUID,
+ADD COLUMN dealer_id UUID;
+
+-- Add foreign key constraints
+ALTER TABLE payments 
+ADD CONSTRAINT fk_payments_buyer 
+  FOREIGN KEY (buyer_id) REFERENCES buyer_accounts(id) ON DELETE SET NULL,
+ADD CONSTRAINT fk_payments_dealer 
+  FOREIGN KEY (dealer_id) REFERENCES dealer_accounts(id) ON DELETE SET NULL;
+
+-- Add constraint to ensure exactly one account type
+ALTER TABLE payments 
+ADD CONSTRAINT check_single_account 
+  CHECK ((buyer_id IS NULL) != (dealer_id IS NULL));
+
+-- Migrate existing account_id data based on transaction_type
+UPDATE payments 
+SET buyer_id = account_id 
+WHERE transaction_type = 'verification';
+
+UPDATE payments 
+SET dealer_id = account_id 
+WHERE transaction_type = 'subscription';
 
 -- Add provider-agnostic payment info to payments table
 ALTER TABLE payments 
@@ -97,9 +123,14 @@ SET payment_provider_info = jsonb_build_object(
 )
 WHERE stripe_payment_intent_id IS NOT NULL;
 
--- Remove Stripe-specific column
+-- Remove old columns
 ALTER TABLE payments 
+DROP COLUMN IF EXISTS account_id,
 DROP COLUMN IF EXISTS stripe_payment_intent_id;
+
+-- Add indexes for new structure
+CREATE INDEX idx_payments_buyer_id ON payments(buyer_id);
+CREATE INDEX idx_payments_dealer_id ON payments(dealer_id);
 
 -- =============================================
 -- STEP 6: UPDATE HELPER FUNCTIONS
