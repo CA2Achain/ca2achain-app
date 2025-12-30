@@ -1,6 +1,7 @@
 import { getClient } from './database/connection.js';
 import { getBuyerByAuth } from './database/buyer-accounts.js';
 import { getDealerByAuth } from './database/dealer-accounts.js';
+import type { BuyerAccount, DealerAccount } from '@ca2achain/shared';
 
 // Send magic link for passwordless login
 export const sendMagicLink = async (
@@ -51,22 +52,22 @@ export const getUserFromToken = async (accessToken: string) => {
   if (!user) throw new Error('User not found');
   
   // Try to find buyer account first
-  let accountData = await getBuyerByAuth(user.id);
-  if (accountData) {
+  const buyerAccountData = await getBuyerByAuth(user.id);
+  if (buyerAccountData) {
     return {
       supabaseUser: user,
       accountType: 'buyer' as const,
-      account: accountData
+      account: buyerAccountData
     };
   }
   
   // Try dealer account
-  accountData = await getDealerByAuth(user.id);
-  if (accountData) {
+  const dealerAccountData = await getDealerByAuth(user.id);
+  if (dealerAccountData) {
     return {
       supabaseUser: user,
       accountType: 'dealer' as const,
-      account: accountData
+      account: dealerAccountData
     };
   }
   
