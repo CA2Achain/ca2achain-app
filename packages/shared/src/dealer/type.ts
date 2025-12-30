@@ -2,20 +2,27 @@ import { z } from 'zod';
 import {
   dealerRegistrationSchema,
   dealerAccountSchema,
-  dealerSubscriptionSchema,
+  dealerSubscriptionUpdateSchema,
   dealerProfileUpdateSchema,
-  dealerApiKeySchema
+  dealerCreditPurchaseSchema,
+  dealerApiKeySchema,
+  dealerBillingSummarySchema
 } from './schema.js';
 
 // Inferred types from Zod schemas
 export type DealerRegistration = z.infer<typeof dealerRegistrationSchema>;
 export type DealerAccount = z.infer<typeof dealerAccountSchema>;
-export type DealerSubscription = z.infer<typeof dealerSubscriptionSchema>;
+export type DealerSubscriptionUpdate = z.infer<typeof dealerSubscriptionUpdateSchema>;
 export type DealerProfileUpdate = z.infer<typeof dealerProfileUpdateSchema>;
+export type DealerCreditPurchase = z.infer<typeof dealerCreditPurchaseSchema>;
 export type DealerApiKey = z.infer<typeof dealerApiKeySchema>;
+export type DealerBillingSummary = z.infer<typeof dealerBillingSummarySchema>;
 
 // Subscription status enum
 export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | 'trialing';
+
+// Subscription tier type
+export type SubscriptionTier = 1 | 2 | 3;
 
 // API response types
 export interface DealerRegistrationResponse {
@@ -31,40 +38,23 @@ export interface DealerProfileResponse {
   dealer: DealerAccount;
 }
 
+// Updated usage response for credit system
 export interface DealerUsageResponse {
   success: boolean;
   usage: {
-    queries_used: number;
-    monthly_limit: number;
-    queries_remaining: number;
-    billing_period_start: string;
-    billing_period_end: string;
+    credits_available: number; // (purchased + additional) - used
+    credits_purchased: number;
+    additional_credits_purchased: number;
+    credits_used: number;
+    credits_expire_at: string;
+    subscription_tier: SubscriptionTier;
   };
 }
 
-// Legacy interface for backward compatibility
-export interface Customer {
-  id: string;
-  company_name: string;
-  email: string;
-  privy_did?: string;
-  api_key_hash: string;
-  stripe_customer_id: string;
-  stripe_subscription_id?: string;
-  subscription_status: SubscriptionStatus;
-  monthly_query_limit: number;
-  queries_used_this_month: number;
-  billing_period_start: string;
-  billing_period_end: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CustomerUsage {
-  customer_id: string;
-  period_start: string;
-  period_end: string;
-  queries_used: number;
-  queries_limit: number;
-  queries_remaining: number;
+// Credit purchase response
+export interface DealerCreditPurchaseResponse {
+  success: boolean;
+  credits_added?: number;
+  new_balance?: number;
+  error?: string;
 }
