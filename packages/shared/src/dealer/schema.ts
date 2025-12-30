@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { addressStringSchema, phoneNumberSchema, paymentInfoSchema } from '../common/schema.js';
+import { addressSchema, phoneNumberSchema, paymentInfoSchema } from '../common/schema.js';
 
 // =============================================
 // DEALER REGISTRATION & ACCOUNT SCHEMAS
@@ -9,7 +9,7 @@ import { addressStringSchema, phoneNumberSchema, paymentInfoSchema } from '../co
 export const dealerRegistrationSchema = z.object({
   company_name: z.string().min(2),
   business_email: z.string().email(),
-  business_address: addressStringSchema, // Use common address schema
+  business_address: addressSchema, // Use structured address schema
   business_phone: phoneNumberSchema, // Use common phone validation
   subscription_tier: z.number().int().min(1).max(3).default(1), // Tier 1, 2, or 3
 });
@@ -22,8 +22,11 @@ export const dealerAccountSchema = z.object({
   // Business information
   company_name: z.string(),
   business_email: z.string(), // company@business.com format required
-  business_address: z.string().optional(),
+  business_address: addressSchema.optional(), // JSON blob with structured address
   business_phone: z.string().optional(),
+  
+  // Immutable reference for audit trail (CCPA compliant)
+  dealer_reference_id: z.string(),
   
   // API authentication
   api_key_hash: z.string(),
@@ -59,7 +62,7 @@ export const dealerAccountSchema = z.object({
 export const dealerProfileUpdateSchema = z.object({
   company_name: z.string().min(1).optional(),
   business_email: z.string().email().optional(),
-  business_address: z.string().min(10).optional(),
+  business_address: addressSchema.optional(), // Structured address object
   business_phone: phoneNumberSchema.optional(),
   subscription_tier: z.number().int().min(1).max(3).optional(),
   payment_info: paymentInfoSchema,

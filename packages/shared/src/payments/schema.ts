@@ -25,7 +25,6 @@ export const paymentSchema = z.object({
   payment_provider_info: paymentProviderInfoSchema,
   
   payment_timestamp: z.string().datetime(),
-  created_at: z.string().datetime(),
 });
 
 // Payment creation request
