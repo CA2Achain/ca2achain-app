@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { createRouteSchema, sendSuccess, sendError, sendValidationError, authRequired } from '../utils/api-responses.js';
 import { 
   createPaymentEvent, 
@@ -18,38 +18,43 @@ import {
   updatePaymentSchema,
   customerPaymentHistorySchema,
   type CreatePayment,
-  type Payment
+  type Payment,
+  type BuyerAccount,
+  type DealerAccount
 } from '@ca2achain/shared';
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
   // Create buyer payment session
-  fastify.post('/buyer/checkout', createRouteSchema({
-    tags: ['payments'],
-    summary: 'Create buyer payment session',
-    description: 'Create Stripe checkout session for buyer $39 verification fee',
-    security: authRequired,
-    response: {
-      description: 'Payment session created',
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', enum: [true] },
-        data: {
-          type: 'object',
-          properties: {
-            checkout_url: { type: 'string', format: 'uri' },
-            session_id: { type: 'string' },
-            payment_id: { type: 'string', format: 'uuid' }
+  fastify.post('/buyer/checkout', {
+    ...createRouteSchema({
+      tags: ['payments'],
+      summary: 'Create buyer payment session',
+      description: 'Create Stripe checkout session for buyer $39 verification fee',
+      security: authRequired,
+      response: {
+        description: 'Payment session created',
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: {
+            type: 'object',
+            properties: {
+              checkout_url: { type: 'string', format: 'uri' },
+              session_id: { type: 'string' },
+              payment_id: { type: 'string', format: 'uuid' }
+            }
           }
         }
       }
-    }
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'buyer') {
+      if (!request.user || request.user.account_type !== 'buyer' || !request.user.account_data) {
         return sendError(reply, 'Buyer access required', 403);
       }
 
-      const buyer = request.user.account_data;
+      const buyer = request.user.account_data as BuyerAccount;
       
       // Check if payment already completed
       if (buyer.payment_status === 'succeeded') {
@@ -64,7 +69,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         customer_reference_id: buyer.buyer_reference_id,
         payment_provider_info: {
           stripe_info: {
-            customer_email: request.user.email
+            stripe_customer_id: `customer_${buyer.buyer_reference_id}`
           }
         }
       };
@@ -90,26 +95,40 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
   });
 
   // Create dealer subscription payment
-  fastify.post('/dealer/subscription', createRouteSchema({
-    tags: ['payments'],
-    summary: 'Create dealer subscription payment',
-    description: 'Create Stripe checkout for dealer subscription',
-    security: authRequired,
-    body: {
-      type: 'object',
-      properties: {
-        subscription_tier: { type: 'integer', minimum: 1, maximum: 3 }
-      },
-      required: ['subscription_tier']
-    }
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+  fastify.post('/dealer/subscription', {
+    ...createRouteSchema({
+      tags: ['payments'],
+      summary: 'Create dealer subscription payment',
+      description: 'Create Stripe checkout for dealer subscription',
+      security: authRequired,
+      body: {
+        type: 'object',
+        properties: {
+          subscription_tier: { type: 'integer', minimum: 1, maximum: 3 }
+        },
+        required: ['subscription_tier']
+      }
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'dealer') {
+      if (!request.user || request.user.account_type !== 'dealer' || !request.user.account_data) {
         return sendError(reply, 'Dealer access required', 403);
       }
 
-      const dealer = request.user.account_data;
+      const dealer = request.user.account_data as DealerAccount;
       const { subscription_tier } = request.body as { subscription_tier: number };
+
+      // Explicit type checking for dealer properties
+      if (!dealer || typeof dealer !== 'object' || !('dealer_reference_id' in dealer)) {
+        return sendError(reply, 'Invalid dealer account structure', 500);
+      }
+
+      // Extract dealer reference ID with explicit casting
+      const dealerReferenceId = dealer.dealer_reference_id as string;
+      if (!dealerReferenceId) {
+        return sendError(reply, 'Missing dealer reference ID', 500);
+      }
 
       // Calculate subscription amount based on tier
       const tierPricing = { 1: 19900, 2: 99900, 3: 379900 }; // $199, $999, $3799
@@ -120,11 +139,10 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         dealer_id: dealer.id,
         transaction_type: 'subscription',
         amount_cents: amount,
-        customer_reference_id: dealer.dealer_reference_id,
+        customer_reference_id: dealerReferenceId,
         payment_provider_info: {
           stripe_info: {
-            customer_email: dealer.business_email,
-            subscription_tier
+            stripe_customer_id: `dealer_${dealerReferenceId}`
           }
         }
       };
@@ -134,8 +152,9 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       // Create Stripe subscription checkout (mock)
       const session = await createDealerSubscriptionCheckout(
         dealer.business_email,
+        dealer.company_name,
         dealer.id,
-        subscription_tier
+        `tier${subscription_tier}` as 'tier1' | 'tier2' | 'tier3'
       );
 
       return sendSuccess(reply, {
@@ -151,59 +170,75 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
   });
 
   // Get payment history for authenticated user
-  fastify.get('/history', createRouteSchema({
-    tags: ['payments'],
-    summary: 'Get payment history',
-    description: 'Get payment history for authenticated buyer or dealer',
-    security: authRequired,
-    response: {
-      description: 'Payment history',
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', enum: [true] },
-        data: {
-          type: 'object',
-          properties: {
-            account_type: { type: 'string', enum: ['buyer', 'dealer'] },
-            customer_reference_id: { type: 'string' },
-            total_payments: { type: 'integer' },
-            payments: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string', format: 'uuid' },
-                  transaction_type: { type: 'string', enum: ['verification', 'subscription'] },
-                  amount_cents: { type: 'integer' },
-                  status: { type: 'string' },
-                  payment_timestamp: { type: 'string', format: 'date-time' }
+  fastify.get('/history', {
+    ...createRouteSchema({
+      tags: ['payments'],
+      summary: 'Get payment history',
+      description: 'Get payment history for authenticated buyer or dealer',
+      security: authRequired,
+      response: {
+        description: 'Payment history',
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: {
+            type: 'object',
+            properties: {
+              account_type: { type: 'string', enum: ['buyer', 'dealer'] },
+              customer_reference_id: { type: 'string' },
+              total_payments: { type: 'integer' },
+              payments: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    transaction_type: { type: 'string', enum: ['verification', 'subscription'] },
+                    amount_cents: { type: 'integer' },
+                    status: { type: 'string' },
+                    payment_timestamp: { type: 'string', format: 'date-time' }
+                  }
                 }
               }
             }
           }
         }
       }
-    }
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || !request.user.account_type) {
+      if (!request.user || !request.user.account_type || !request.user.account_data) {
         return sendError(reply, 'Account not found', 404);
       }
 
       const accountData = request.user.account_data;
       let payments: Payment[];
+      let customerReferenceId: string;
 
       // Get payments based on account type (using our database functions)
       if (request.user.account_type === 'buyer') {
-        payments = await getBuyerPaymentHistory(accountData.id);
+        const buyerData = accountData as BuyerAccount;
+        payments = await getBuyerPaymentHistory(buyerData.id);
+        customerReferenceId = buyerData.buyer_reference_id;
       } else {
-        payments = await getDealerPaymentHistory(accountData.id);
+        const dealerData = accountData as DealerAccount;
+        // Explicit property extraction for dealer reference ID
+        if (!dealerData || !('dealer_reference_id' in dealerData)) {
+          return sendError(reply, 'Invalid dealer account structure', 500);
+        }
+        const dealerReferenceId = dealerData.dealer_reference_id as string;
+        if (!dealerReferenceId) {
+          return sendError(reply, 'Missing dealer reference ID', 500);
+        }
+        payments = await getDealerPaymentHistory(dealerData.id);
+        customerReferenceId = dealerReferenceId;
       }
 
       // Format response following customerPaymentHistorySchema structure
       const response = {
         account_type: request.user.account_type,
-        customer_reference_id: accountData.buyer_reference_id || accountData.dealer_reference_id,
+        customer_reference_id: customerReferenceId,
         total_payments: payments.length,
         payments: payments.map(p => ({
           id: p.id,
@@ -224,33 +259,36 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
   });
 
   // Verify payment completion
-  fastify.post('/verify', createRouteSchema({
-    tags: ['payments'],
-    summary: 'Verify payment completion',
-    description: 'Verify payment session completion and update status',
-    security: authRequired,
-    body: {
-      type: 'object',
-      properties: {
-        session_id: { type: 'string' },
-        payment_id: { type: 'string', format: 'uuid' }
-      },
-      required: ['session_id', 'payment_id']
-    }
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+  fastify.post('/verify', {
+    ...createRouteSchema({
+      tags: ['payments'],
+      summary: 'Verify payment completion',
+      description: 'Verify payment session completion and update status',
+      security: authRequired,
+      body: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string' },
+          payment_id: { type: 'string', format: 'uuid' }
+        },
+        required: ['session_id', 'payment_id']
+      }
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { session_id, payment_id } = request.body as { session_id: string; payment_id: string };
 
       // Verify payment with Stripe (mock)
-      let paymentVerified = false;
+      let paymentResult: any = null;
       
       if (request.user?.account_type === 'buyer') {
-        paymentVerified = await verifyBuyerPayment(session_id);
+        paymentResult = await verifyBuyerPayment(session_id);
       } else if (request.user?.account_type === 'dealer') {
-        paymentVerified = await verifyDealerSubscription(session_id);
+        paymentResult = await verifyDealerSubscription(session_id);
       }
 
-      if (paymentVerified) {
+      if (paymentResult) {
         // Update payment status using our database function
         await updatePaymentStatus(payment_id, 'succeeded', {
           stripe_info: {

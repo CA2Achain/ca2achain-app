@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { sendMagicLink, getUserFromToken, verifyOtp } from '../services/auth.js';
 import { authLoginSchema, authCallbackSchema, type AuthLogin } from '@ca2achain/shared';
 import { createRouteSchema, sendSuccess, sendError, sendValidationError, authRequired } from '../utils/api-responses.js';
@@ -130,32 +130,35 @@ export default async function authRoutes(fastify: FastifyInstance) {
   });
 
   // Get current user info (requires authentication)
-  fastify.get('/me', createRouteSchema({
-    tags: ['auth'],
-    summary: 'Get current user',
-    description: 'Get authenticated user information from supabaseAuthUserSchema',
-    security: authRequired,
-    response: {
-      description: 'Current user information',
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', enum: [true] },
-        data: {
-          type: 'object',
-          properties: {
-            id: { type: 'string', format: 'uuid' },
-            email: { type: 'string', format: 'email' },
-            account_type: { type: 'string', enum: ['buyer', 'dealer'], nullable: true },
-            account_data: { 
-              type: 'object',
-              description: 'Buyer or dealer account data if exists',
-              nullable: true
+  fastify.get('/me', {
+    ...createRouteSchema({
+      tags: ['auth'],
+      summary: 'Get current user',
+      description: 'Get authenticated user information from supabaseAuthUserSchema',
+      security: authRequired,
+      response: {
+        description: 'Current user information',
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', format: 'uuid' },
+              email: { type: 'string', format: 'email' },
+              account_type: { type: 'string', enum: ['buyer', 'dealer'], nullable: true },
+              account_data: { 
+                type: 'object',
+                description: 'Buyer or dealer account data if exists',
+                nullable: true
+              }
             }
           }
         }
       }
-    }
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const user = request.user!;
 
@@ -173,25 +176,28 @@ export default async function authRoutes(fastify: FastifyInstance) {
   });
 
   // Sign out (client should handle token removal)
-  fastify.post('/logout', createRouteSchema({
-    tags: ['auth'],
-    summary: 'Sign out user',
-    description: 'Sign out authenticated user (client should remove token from storage)',
-    security: authRequired,
-    response: {
-      description: 'Signed out successfully',
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', enum: [true] },
-        data: {
-          type: 'object',
-          properties: {
-            message: { type: 'string' }
+  fastify.post('/logout', {
+    ...createRouteSchema({
+      tags: ['auth'],
+      summary: 'Sign out user',
+      description: 'Sign out authenticated user (client should remove token from storage)',
+      security: authRequired,
+      response: {
+        description: 'Signed out successfully',
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: {
+            type: 'object',
+            properties: {
+              message: { type: 'string' }
+            }
           }
         }
       }
-    }
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       // With Supabase JWT, server-side invalidation is not possible
       // Client should remove token from storage

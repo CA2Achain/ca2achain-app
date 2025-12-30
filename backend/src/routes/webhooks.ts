@@ -37,7 +37,8 @@ export default async function webhookRoutes(fastify: FastifyInstance) {
       // Verify webhook signature (mock verification for now)
       const isValidSignature = verifyWebhookSignature(
         JSON.stringify(request.body),
-        signature
+        signature,
+        process.env.STRIPE_WEBHOOK_SECRET || 'mock_webhook_secret'
       );
 
       if (!isValidSignature) {

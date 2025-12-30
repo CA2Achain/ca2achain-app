@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { createRouteSchema, sendSuccess, sendError, sendValidationError, sendUnauthorized, authRequired } from '../utils/api-responses.js';
 import { createBuyer, getBuyerByAuth, updateBuyerAccount } from '../services/database/buyer-accounts.js';
 import { deleteBuyerData, exportBuyerData, validateBuyerOwnership } from '../services/database/ccpa-privacy.js';
@@ -9,35 +9,39 @@ import {
   buyerDataRequestSchema,
   type BuyerRegistration, 
   type BuyerProfileUpdate,
-  type BuyerDataRequest
+  type BuyerDataRequest,
+  type BuyerAccount
 } from '@ca2achain/shared';
 
 export default async function buyerRoutes(fastify: FastifyInstance) {
   // Buyer registration (creates buyer_accounts entry linked to auth.users)
-  fastify.post('/register', createRouteSchema({
-    tags: ['buyer'],
-    summary: 'Register new buyer account',
-    description: 'Create a new buyer account linked to authenticated user',
-    security: authRequired,
-    body: {
-      type: 'object',
-      properties: {
-        first_name: { type: 'string', minLength: 1 },
-        last_name: { type: 'string', minLength: 1 },
-        email: { type: 'string', format: 'email' },
-        phone: { type: 'string', pattern: '^[0-9]{10}$' }
+  fastify.post('/register', {
+    ...createRouteSchema({
+      tags: ['buyer'],
+      summary: 'Register new buyer account',
+      description: 'Create a new buyer account linked to authenticated user',
+      security: authRequired,
+      body: {
+        type: 'object',
+        properties: {
+          first_name: { type: 'string', minLength: 1 },
+          last_name: { type: 'string', minLength: 1 },
+          email: { type: 'string', format: 'email' },
+          phone: { type: 'string', pattern: '^[0-9]{10}$' }
+        },
+        required: ['first_name', 'last_name', 'email']
       },
-      required: ['first_name', 'last_name', 'email']
-    },
-    response: {
-      description: 'Buyer account created successfully',
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', enum: [true] },
-        data: { $ref: '#/components/schemas/BuyerAccount' }
+      response: {
+        description: 'Buyer account created successfully',
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: { $ref: '#/components/schemas/BuyerAccount' }
+        }
       }
-    }
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const registrationData = buyerRegistrationSchema.parse(request.body) as BuyerRegistration;
 
@@ -62,20 +66,23 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
   });
 
   // Get buyer profile
-  fastify.get('/profile', createRouteSchema({
-    tags: ['buyer'],
-    summary: 'Get buyer profile',
-    description: 'Retrieve authenticated buyer account information',
-    security: authRequired,
-    response: {
-      description: 'Buyer profile information',
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', enum: [true] },
-        data: { $ref: '#/components/schemas/BuyerAccount' }
+  fastify.get('/profile', {
+    ...createRouteSchema({
+      tags: ['buyer'],
+      summary: 'Get buyer profile',
+      description: 'Retrieve authenticated buyer account information',
+      security: authRequired,
+      response: {
+        description: 'Buyer profile information',
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: { $ref: '#/components/schemas/BuyerAccount' }
+        }
       }
-    }
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       if (!request.user || request.user.account_type !== 'buyer') {
         return sendUnauthorized(reply, 'Buyer access required');
@@ -95,35 +102,39 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
   });
 
   // Update buyer profile (only fields in buyerProfileUpdateSchema)
-  fastify.put('/profile', createRouteSchema({
-    tags: ['buyer'],
-    summary: 'Update buyer profile',
-    description: 'Update buyer account information',
-    security: authRequired,
-    body: {
-      type: 'object',
-      properties: {
-        first_name: { type: 'string', minLength: 1 },
-        last_name: { type: 'string', minLength: 1 },
-        phone: { type: 'string', pattern: '^[0-9]{10}$' }
+  fastify.put('/profile', {
+    ...createRouteSchema({
+      tags: ['buyer'],
+      summary: 'Update buyer profile',
+      description: 'Update buyer account information',
+      security: authRequired,
+      body: {
+        type: 'object',
+        properties: {
+          first_name: { type: 'string', minLength: 1 },
+          last_name: { type: 'string', minLength: 1 },
+          phone: { type: 'string', pattern: '^[0-9]{10}$' }
+        }
+      },
+      response: {
+        description: 'Profile updated successfully',
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: { $ref: '#/components/schemas/BuyerAccount' }
+        }
       }
-    },
-    response: {
-      description: 'Profile updated successfully',
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', enum: [true] },
-        data: { $ref: '#/components/schemas/BuyerAccount' }
-      }
-    }
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'buyer') {
+      if (!request.user || request.user.account_type !== 'buyer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Buyer access required');
       }
 
+      const buyer = request.user.account_data as BuyerAccount;
       const updateData = buyerProfileUpdateSchema.parse(request.body) as BuyerProfileUpdate;
-      const buyerId = request.user.account_data.id;
+      const buyerId = buyer.id;
 
       // Update buyer account
       const success = await updateBuyerAccount(buyerId, updateData);
@@ -145,49 +156,52 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
   });
 
   // Get verification history (from buyerVerificationHistorySchema)
-  fastify.get('/verifications', createRouteSchema({
-    tags: ['buyer'],
-    summary: 'Get verification history',
-    description: 'Retrieve history of dealer verification requests',
-    security: authRequired,
-    response: {
-      description: 'Verification history',
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', enum: [true] },
-        data: {
-          type: 'object',
-          properties: {
-            buyer_id: { type: 'string', format: 'uuid' },
-            buyer_reference_id: { type: 'string' },
-            total_verifications: { type: 'integer' },
-            verification_events: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  compliance_event_id: { type: 'string', format: 'uuid' },
-                  dealer_company_name: { type: 'string' },
-                  dealer_reference_id: { type: 'string' },
-                  age_verified: { type: 'boolean' },
-                  address_verified: { type: 'boolean' },
-                  address_match_confidence: { type: 'number' },
-                  verified_at: { type: 'string', format: 'date-time' },
-                  blockchain_transaction_hash: { type: 'string' }
+  fastify.get('/verifications', {
+    ...createRouteSchema({
+      tags: ['buyer'],
+      summary: 'Get verification history',
+      description: 'Retrieve history of dealer verification requests',
+      security: authRequired,
+      response: {
+        description: 'Verification history',
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: {
+            type: 'object',
+            properties: {
+              buyer_id: { type: 'string', format: 'uuid' },
+              buyer_reference_id: { type: 'string' },
+              total_verifications: { type: 'integer' },
+              verification_events: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    compliance_event_id: { type: 'string', format: 'uuid' },
+                    dealer_company_name: { type: 'string' },
+                    dealer_reference_id: { type: 'string' },
+                    age_verified: { type: 'boolean' },
+                    address_verified: { type: 'boolean' },
+                    address_match_confidence: { type: 'number' },
+                    verified_at: { type: 'string', format: 'date-time' },
+                    blockchain_transaction_hash: { type: 'string' }
+                  }
                 }
               }
             }
           }
         }
       }
-    }
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'buyer') {
+      if (!request.user || request.user.account_type !== 'buyer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Buyer access required');
       }
 
-      const buyer = request.user.account_data;
+      const buyer = request.user.account_data as BuyerAccount;
       const history = await getVerificationHistory(buyer.id);
 
       // Format according to buyerVerificationHistorySchema
@@ -216,18 +230,21 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
   });
 
   // CCPA data export (follows buyerDataExportSchema)
-  fastify.get('/export-data', createRouteSchema({
-    tags: ['buyer'],
-    summary: 'Export buyer data (CCPA)',
-    description: 'Export all personal data per buyerDataExportSchema',
-    security: authRequired
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+  fastify.get('/export-data', {
+    ...createRouteSchema({
+      tags: ['buyer'],
+      summary: 'Export buyer data (CCPA)',
+      description: 'Export all personal data per buyerDataExportSchema',
+      security: authRequired
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'buyer') {
+      if (!request.user || request.user.account_type !== 'buyer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Buyer access required');
       }
 
-      const buyer = request.user.account_data;
+      const buyer = request.user.account_data as BuyerAccount;
       const exportData = await exportBuyerData(buyer.id);
 
       return sendSuccess(reply, exportData, 200);
@@ -239,24 +256,27 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
   });
 
   // CCPA account deletion (follows buyerDataRequestSchema)
-  fastify.delete('/account', createRouteSchema({
-    tags: ['buyer'],
-    summary: 'Delete buyer account (CCPA)',
-    description: 'Process CCPA deletion request per buyerDataRequestSchema',
-    security: authRequired,
-    body: {
-      type: 'object',
-      properties: {
-        request_type: {
-          type: 'string',
-          enum: ['delete_account']
-        }
-      },
-      required: ['request_type']
-    }
-  }), { preHandler: fastify.authenticate }, async (request, reply) => {
+  fastify.delete('/account', {
+    ...createRouteSchema({
+      tags: ['buyer'],
+      summary: 'Delete buyer account (CCPA)',
+      description: 'Process CCPA deletion request per buyerDataRequestSchema',
+      security: authRequired,
+      body: {
+        type: 'object',
+        properties: {
+          request_type: {
+            type: 'string',
+            enum: ['delete_account']
+          }
+        },
+        required: ['request_type']
+      }
+    }),
+    preHandler: fastify.authenticate
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'buyer') {
+      if (!request.user || request.user.account_type !== 'buyer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Buyer access required');
       }
 
@@ -266,7 +286,7 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
         return sendValidationError(reply, 'Invalid request type for this endpoint');
       }
 
-      const buyer = request.user.account_data;
+      const buyer = request.user.account_data as BuyerAccount;
 
       // Validate ownership
       const isOwner = await validateBuyerOwnership(request.user.id, buyer.id);
