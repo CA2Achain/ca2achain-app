@@ -78,7 +78,7 @@ GET {{BASE_URL}}/health
   "service": "ca2achain-api"
 }
 ```
-**Test Status:** [ ] Pass [ ] Fail  
+**Test Status:** [X] Pass [ ] Fail  
 **Notes:**
 
 #### **1.2 System Status**
@@ -93,7 +93,7 @@ GET {{BASE_URL}}/status
   "environment": "development"
 }
 ```
-**Test Status:** [ ] Pass [ ] Fail  
+**Test Status:** [X] Pass [ ] Fail  
 **Notes:**
 
 ---
