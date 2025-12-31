@@ -50,7 +50,7 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
         type: 'object',
         properties: {
           success: { type: 'boolean', enum: [true] },
-          data: { $ref: '#/components/schemas/DealerAccount' }
+          data: { type: 'object', properties: { id: { type: 'string' }, company_name: { type: 'string' }, dealer_reference_id: { type: 'string' } } }
         }
       }
     }),
@@ -101,7 +101,7 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
         type: 'object',
         properties: {
           success: { type: 'boolean', enum: [true] },
-          data: { $ref: '#/components/schemas/DealerAccount' }
+          data: { type: 'object', properties: { id: { type: 'string' }, company_name: { type: 'string' }, dealer_reference_id: { type: 'string' } } }
         }
       }
     }),

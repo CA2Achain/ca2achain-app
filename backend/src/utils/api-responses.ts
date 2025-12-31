@@ -60,7 +60,7 @@ export const sendInsufficientCredits = (reply: FastifyReply, message = 'Insuffic
   return sendError(reply, 'Insufficient Credits', 402, message, 'INSUFFICIENT_CREDITS');
 };
 
-// Swagger schema helpers for route definitions
+// Schema helpers for route definitions (Swagger references removed for now)
 export const createRouteSchema = (options: {
   tags?: string[];
   summary?: string;
@@ -72,28 +72,14 @@ export const createRouteSchema = (options: {
   response?: any;
 }) => ({
   schema: {
-    tags: options.tags || [],
-    summary: options.summary || '',
-    description: options.description || '',
-    ...(options.security && { security: options.security }),
     ...(options.body && { body: options.body }),
     ...(options.querystring && { querystring: options.querystring }),
     ...(options.params && { params: options.params }),
-    response: {
-      200: options.response || {
-        description: 'Success',
-        type: 'object',
-        properties: {
-          success: { type: 'boolean', enum: [true] },
-          data: { type: 'object' }
-        }
-      },
-      400: { $ref: '#/components/responses/ValidationError' },
-      401: { $ref: '#/components/responses/UnauthorizedError' },
-      403: { $ref: '#/components/responses/ForbiddenError' },
-      404: { $ref: '#/components/responses/NotFoundError' },
-      500: { $ref: '#/components/responses/InternalServerError' }
-    }
+    ...(options.response && { 
+      response: {
+        200: options.response
+      }
+    })
   }
 });
 

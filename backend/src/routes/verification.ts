@@ -347,7 +347,7 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
         type: 'object',
         properties: {
           success: { type: 'boolean', enum: [true] },
-          data: { $ref: '#/components/schemas/ComplianceEvent' }
+          data: { type: 'object', properties: { id: { type: 'string' }, age_verified: { type: 'boolean' }, address_verified: { type: 'boolean' } } }
         }
       }
     }),
@@ -409,7 +409,7 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
               offset: { type: 'integer' },
               verifications: {
                 type: 'array',
-                items: { $ref: '#/components/schemas/ComplianceEvent' }
+                items: { type: 'object', properties: { id: { type: 'string' }, age_verified: { type: 'boolean' }, address_verified: { type: 'boolean' } } }
               }
             }
           }

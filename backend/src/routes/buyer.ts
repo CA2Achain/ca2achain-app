@@ -36,7 +36,7 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
         type: 'object',
         properties: {
           success: { type: 'boolean', enum: [true] },
-          data: { $ref: '#/components/schemas/BuyerAccount' }
+          data: { type: 'object', properties: { id: { type: 'string' }, first_name: { type: 'string' }, verification_status: { type: 'string' } } }
         }
       }
     }),
@@ -77,7 +77,7 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
         type: 'object',
         properties: {
           success: { type: 'boolean', enum: [true] },
-          data: { $ref: '#/components/schemas/BuyerAccount' }
+          data: { type: 'object', properties: { id: { type: 'string' }, first_name: { type: 'string' }, verification_status: { type: 'string' } } }
         }
       }
     }),
@@ -121,7 +121,7 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
         type: 'object',
         properties: {
           success: { type: 'boolean', enum: [true] },
-          data: { $ref: '#/components/schemas/BuyerAccount' }
+          data: { type: 'object', properties: { id: { type: 'string' }, first_name: { type: 'string' }, verification_status: { type: 'string' } } }
         }
       }
     }),
