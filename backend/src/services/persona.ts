@@ -1,37 +1,21 @@
-import type { PersonaData } from '@ca2achain/shared';
+// Persona service - Identity verification for buyer registration
+// Handles driver's license verification and data extraction for CA2ACHAIN identity-as-a-service
+// Core workflow: Create inquiry → Verify ID → Extract data → Store encrypted
 
-// Define missing types locally
-interface PersonaInquiry {
-  id: string;
-  type: string;
-  attributes: {
-    status: string;
-    'reference-id': string;
-    'session-token': string;
-    'created-at': string;
-  };
-}
+import type { EncryptedPersonaData } from '@ca2achain/shared';
+import { getCurrentTimestamp } from './utilities.js';
 
-interface PersonaVerificationData {
-  first_name: string;
-  last_name: string;
-  birthdate: string;
-  identification_number: string;
-  identification_expiration_date: string;
-  address_street_1: string;
-  address_street_2: string;
-  address_city: string;
-  address_subdivision: string;
-  address_postal_code: string;
-  birth_day: number;
-  birth_month: number;
-  birth_year: number;
-}
+// =============================================
+// PERSONA API INTEGRATION
+// =============================================
 
 const PERSONA_API_URL = 'https://withpersona.com/api/v1';
 
-// Create a new identity verification inquiry for a buyer
-export const createBuyerInquiry = async (buyerId: string): Promise<PersonaInquiry> => {
+/**
+ * Create new identity verification inquiry for buyer
+ * Returns session token for buyer to complete verification
+ */
+export const createBuyerInquiry = async (buyerId: string): Promise<{ inquiryId: string; sessionToken: string }> => {
   if (!process.env.PERSONA_API_KEY) {
     throw new Error('PERSONA_API_KEY environment variable is required');
   }
@@ -40,170 +24,148 @@ export const createBuyerInquiry = async (buyerId: string): Promise<PersonaInquir
     throw new Error('PERSONA_TEMPLATE_ID environment variable is required');
   }
 
-  const response = await fetch(`${PERSONA_API_URL}/inquiries`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.PERSONA_API_KEY}`,
-      'Content-Type': 'application/json',
-      'Persona-Version': '2023-01-05',
-    },
-    body: JSON.stringify({
-      data: {
-        type: 'inquiry',
-        attributes: {
-          'inquiry-template-id': process.env.PERSONA_TEMPLATE_ID,
-          'reference-id': buyerId,
-          'note': 'CA2AChain buyer identity verification for AB 1263 compliance',
-        },
+  try {
+    const response = await fetch(`${PERSONA_API_URL}/inquiries`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.PERSONA_API_KEY}`,
       },
-    }),
-  });
+      body: JSON.stringify({
+        data: {
+          type: 'inquiry',
+          attributes: {
+            'inquiry-template-id': process.env.PERSONA_TEMPLATE_ID,
+            'reference-id': buyerId,
+          }
+        }
+      })
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Persona API error: ${response.status} ${response.statusText} - ${errorText}`);
+    if (!response.ok) {
+      throw new Error(`Persona API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log(`✅ Persona inquiry created for buyer ${buyerId}: ${data.data.id}`);
+    
+    return {
+      inquiryId: data.data.id,
+      sessionToken: data.data.attributes['session-token']
+    };
+
+  } catch (error) {
+    console.error('❌ Failed to create Persona inquiry:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    throw new Error(`Persona inquiry creation failed: ${errorMessage}`);
   }
-
-  const data = await response.json() as any;
-  return data.data;
 };
 
-// Get inquiry status
-export const getInquiryStatus = async (inquiryId: string): Promise<PersonaInquiry> => {
-  const response = await fetch(`${PERSONA_API_URL}/inquiries/${inquiryId}`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${process.env.PERSONA_API_KEY}`,
-      'Persona-Version': '2023-01-05',
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Persona API error: ${response.status} ${response.statusText} - ${errorText}`);
+/**
+ * Check verification status and extract verified data
+ * Called after buyer completes verification to get results
+ */
+export const getVerificationData = async (inquiryId: string): Promise<EncryptedPersonaData | null> => {
+  if (!process.env.PERSONA_API_KEY) {
+    throw new Error('PERSONA_API_KEY environment variable is required');
   }
 
-  const data = await response.json() as any;
-  return data.data;
+  try {
+    const response = await fetch(`${PERSONA_API_URL}/inquiries/${inquiryId}`, {
+      headers: {
+        'Authorization': `Bearer ${process.env.PERSONA_API_KEY}`,
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Persona API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const inquiry = data.data;
+
+    // Check if verification is complete and approved
+    if (inquiry.attributes.status !== 'completed' || inquiry.attributes['decision-status'] !== 'approved') {
+      console.log(`⏳ Verification not complete for inquiry ${inquiryId}: ${inquiry.attributes.status}`);
+      return null;
+    }
+
+    // Extract driver's license data from verification results
+    const verifications = data.included?.filter((item: any) => item.type === 'verification') || [];
+    const documentVerification = verifications.find((v: any) => 
+      v.attributes['verification-template']?.name?.includes('government-id') ||
+      v.attributes['document-type'] === 'drivers-license'
+    );
+
+    if (!documentVerification) {
+      throw new Error('Driver\'s license verification not found');
+    }
+
+    // Extract verified data using existing schema structure
+    const extractedData = documentVerification.attributes.extracted;
+    
+    const personaData: EncryptedPersonaData = {
+      driver_license: {
+        dl_number: extractedData['identification-number'] || '',
+        date_of_birth: extractedData.birthdate || '',
+        full_name: {
+          first_name: extractedData['first-name'] || '',
+          last_name: extractedData['last-name'] || ''
+        },
+        address: {
+          street: extractedData['address-street-1'] || '',
+          street_2: extractedData['address-street-2'],
+          city: extractedData['address-city'] || '',
+          state: extractedData['address-subdivision'] || '',
+          zip_code: extractedData['address-postal-code'] || '',
+          country: 'US'
+        },
+        issued_date: extractedData['identification-issue-date'] || '',
+        expires_date: extractedData['identification-expiration-date'] || ''
+      },
+      persona_session_id: inquiryId
+    };
+
+    console.log(`✅ Verification data extracted for inquiry ${inquiryId}`);
+    return personaData;
+
+  } catch (error) {
+    console.error('❌ Failed to get verification data:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    throw new Error(`Verification data retrieval failed: ${errorMessage}`);
+  }
 };
 
-// Extract and normalize verified data for CA2AChain format
-export const getVerifiedPersonaData = async (inquiryId: string): Promise<PersonaData | null> => {
-  const response = await fetch(`${PERSONA_API_URL}/inquiries/${inquiryId}`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${process.env.PERSONA_API_KEY}`,
-      'Persona-Version': '2023-01-05',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Persona API error: ${response.statusText}`);
+/**
+ * Get inquiry status without extracting full data
+ * Used for checking verification progress
+ */
+export const getInquiryStatus = async (inquiryId: string): Promise<{ status: string; decision?: string }> => {
+  if (!process.env.PERSONA_API_KEY) {
+    throw new Error('PERSONA_API_KEY environment variable is required');
   }
 
-  const data = await response.json() as any;
-  const inquiry = data.data;
+  try {
+    const response = await fetch(`${PERSONA_API_URL}/inquiries/${inquiryId}`, {
+      headers: {
+        'Authorization': `Bearer ${process.env.PERSONA_API_KEY}`,
+      }
+    });
 
-  // Only return data if inquiry is approved
-  if (inquiry.attributes.status !== 'approved') {
-    return null;
+    if (!response.ok) {
+      throw new Error(`Persona API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    return {
+      status: data.data.attributes.status,
+      decision: data.data.attributes['decision-status']
+    };
+
+  } catch (error) {
+    console.error('❌ Failed to get inquiry status:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    throw new Error(`Inquiry status check failed: ${errorMessage}`);
   }
-
-  // Fetch verification data from included resources
-  const verification = data.included?.find((item: any) => 
-    item.type === 'verification/government-id'
-  );
-
-  if (!verification) {
-    throw new Error('No government ID verification found');
-  }
-
-  const attrs = verification.attributes;
-  
-  // Normalize the data to our PersonaData format
-  const personaData: PersonaData = {
-    name: `${attrs['name-first']} ${attrs['name-middle'] || ''} ${attrs['name-last']}`.trim(),
-    dob: attrs.birthdate,
-    dl_number: attrs['identification-number'] || '',
-    dl_expiration: attrs['identification-expiration-date'] || '',
-    address_original: attrs.address ? 
-      `${attrs.address['address-street-1']}, ${attrs.address['address-city']}, ${attrs.address['address-subdivision']} ${attrs.address['address-postal-code']}` : 
-      '',
-    address_normalized: attrs.address ? 
-      `${attrs.address['address-street-1'].toUpperCase()}, ${attrs.address['address-city'].toUpperCase()}, ${attrs.address['address-subdivision']} ${attrs.address['address-postal-code']}` : 
-      '',
-    verification_session_id: inquiryId,
-  };
-
-  return personaData;
-};
-
-// Get inquiry by buyer ID (reference ID)
-export const getInquiryByBuyerId = async (buyerId: string): Promise<PersonaInquiry | null> => {
-  const response = await fetch(`${PERSONA_API_URL}/inquiries?filter[reference-id]=${buyerId}`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${process.env.PERSONA_API_KEY}`,
-      'Persona-Version': '2023-01-05',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Persona API error: ${response.statusText}`);
-  }
-
-  const data = await response.json() as any;
-  
-  if (!data.data || data.data.length === 0) {
-    return null;
-  }
-
-  return data.data[0];
-};
-
-// Check if buyer is verified (has approved inquiry)
-export const isBuyerVerified = async (buyerId: string): Promise<boolean> => {
-  const inquiry = await getInquiryByBuyerId(buyerId);
-  return inquiry?.attributes.status === 'approved';
-};
-
-// Verify Persona webhook signature (basic implementation)
-export const verifyPersonaWebhook = (payload: string, signature: string | undefined): boolean => {
-  return !!(signature && signature.length > 0);
-};
-
-// Legacy functions for backward compatibility
-export const createInquiry = createBuyerInquiry;
-export const getInquiry = getInquiryStatus;
-
-export const getVerifiedData = async (inquiryId: string): Promise<PersonaVerificationData | null> => {
-  const personaData = await getVerifiedPersonaData(inquiryId);
-  
-  if (!personaData) {
-    return null;
-  }
-
-  const [firstName, ...lastNameParts] = personaData.name.split(' ');
-  const lastName = lastNameParts.join(' ');
-  
-  const dobParts = personaData.dob.split('-');
-  const year = parseInt(dobParts[0]);
-  const month = parseInt(dobParts[1]);
-  const day = parseInt(dobParts[2]);
-
-  return {
-    first_name: firstName,
-    last_name: lastName,
-    birthdate: personaData.dob,
-    identification_number: personaData.dl_number,
-    identification_expiration_date: personaData.dl_expiration,
-    address_street_1: personaData.address_original.split(',')[0],
-    address_street_2: '',
-    address_city: 'Los Angeles',
-    address_subdivision: 'CA',
-    address_postal_code: '90001',
-    birth_day: day,
-    birth_month: month,
-    birth_year: year,
-  };
 };

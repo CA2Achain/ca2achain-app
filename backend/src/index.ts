@@ -1,8 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import swagger from '@fastify/swagger';
-import swaggerUi from '@fastify/swagger-ui';
 import dotenv from 'dotenv';
 import { authMiddleware } from './middleware/auth.js';
 import { apiKeyMiddleware } from './middleware/apikey.js';
@@ -10,7 +8,6 @@ import { initSupabase } from './services/database/connection.js';
 import { initStripe } from './services/service-resolver.js';
 import { initResend } from './services/email.js';
 import { logServiceStatus } from './services/service-resolver.js';
-import { swaggerOptions, swaggerUiOptions } from './config/swagger.js';
 
 import authRoutes from './routes/auth.js';
 import buyerRoutes from './routes/buyer.js';
@@ -18,118 +15,139 @@ import dealerRoutes from './routes/dealer.js';
 import verificationRoutes from './routes/verification.js';
 import webhookRoutes from './routes/webhooks.js';
 import paymentsRoutes from './routes/payments.js';
+import healthRoutes from './routes/health.js';
 
+// Load environment variables
 dotenv.config();
 
-// Check which services have API keys available
-const hasStripeKey = !!process.env.STRIPE_SECRET_KEY;
-const hasPersonaKey = !!process.env.PERSONA_API_KEY;
-
-const fastify = Fastify({
+// Create Fastify instance with basic logging
+const fastify = Fastify({ 
   logger: true,
+  trustProxy: true
 });
 
-// Initialize services (automatically uses mocks when API keys missing)
-initSupabase();
+// Initialize services
+await initSupabase();
 initStripe();
 initResend();
 
 // Log which services are real vs mocked
 logServiceStatus();
 
-// Register Swagger for API documentation
-await fastify.register(swagger, swaggerOptions);
-await fastify.register(swaggerUi, swaggerUiOptions);
-
-// Security middleware
-await fastify.register(helmet);
+// Basic security middleware
+await fastify.register(helmet, {
+  contentSecurityPolicy: false // Disable for API
+});
 await fastify.register(cors, {
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true,
 });
 
-// Raw body for webhooks (needed for Stripe signature verification)
-fastify.addContentTypeParser('application/json', { parseAs: 'string' }, fastify.getDefaultJsonParser('ignore', 'ignore'));
+// Health check routes (no auth required)
+await fastify.register(healthRoutes);
 
-// Decorate fastify with auth middleware
-fastify.decorate('authenticate', authMiddleware);
-fastify.decorate('authenticateApiKey', apiKeyMiddleware);
+// Authentication routes (magic link login)
+await fastify.register(authRoutes, { prefix: '/auth' });
 
-// Health check with service status
-fastify.get('/health', async () => {
-  const serviceStatus = {
-    stripe: hasStripeKey ? 'REAL' : 'MOCK',
-    persona: hasPersonaKey ? 'REAL' : 'MOCK', 
-    supabase: !!process.env.SUPABASE_SERVICE_ROLE_KEY ? 'REAL' : 'MISSING',
-    resend: !!process.env.RESEND_API_KEY ? 'REAL' : 'MISSING',
-    encryption: !!process.env.ENCRYPTION_KEY ? 'REAL' : 'MISSING',
-  };
-  
-  return { 
-    status: 'ok', 
-    service: 'CA2AChain API',
-    version: '1.0.0',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    services: serviceStatus,
-  };
+// Buyer routes (protected by auth middleware)
+await fastify.register(buyerRoutes, { 
+  prefix: '/buyer',
+  preHandler: authMiddleware 
 });
 
-// API documentation endpoint
-fastify.get('/api', async () => {
-  const services = {
-    stripe: hasStripeKey ? 'REAL' : 'MOCK',
-    persona: hasPersonaKey ? 'REAL' : 'MOCK',
-    supabase: !!process.env.SUPABASE_SERVICE_ROLE_KEY ? 'REAL' : 'MISSING',
-    resend: !!process.env.RESEND_API_KEY ? 'REAL' : 'MISSING',
-    encryption: !!process.env.ENCRYPTION_KEY ? 'REAL' : 'MISSING',
-  };
-  
-  return {
-    name: 'CA2AChain API',
-    description: 'AB 1263 Compliance API for firearm accessory dealers',
-    version: '1.0.0',
-    docs: process.env.FRONTEND_URL + '/docs',
-    endpoints: {
-      auth: '/api/auth',
-      buyer: '/api/buyer',
-      dealer: '/api/dealer', 
-      verification: '/api/verify',
-      webhooks: '/webhooks',
-    },
-    features: [
-      'Zero-knowledge identity verification',
-      'AB 1263 compliance automation',
-      'CCPA compliant data handling',
-      'Privado ID integration',
-      'Stripe payment processing',
-    ],
-    services: services,
-    mocked_services: Object.entries(services)
-      .filter(([_, status]) => status === 'MOCK')
-      .map(([service, _]) => service),
-  };
+// Dealer routes (protected by auth or API key middleware) 
+await fastify.register(dealerRoutes, { 
+  prefix: '/dealer',
+  preHandler: [authMiddleware, apiKeyMiddleware]
 });
 
-// Register routes with proper prefixes
-await fastify.register(authRoutes, { prefix: '/api/auth' });
-await fastify.register(buyerRoutes, { prefix: '/api/buyer' });
-await fastify.register(dealerRoutes, { prefix: '/api/dealer' });
-await fastify.register(verificationRoutes, { prefix: '/api' });
-await fastify.register(paymentsRoutes, { prefix: '/api/payments' });
+// Verification routes (protected by API key middleware)
+await fastify.register(verificationRoutes, { 
+  prefix: '/verify',
+  preHandler: apiKeyMiddleware
+});
+
+// Payment routes (protected by auth middleware)
+await fastify.register(paymentsRoutes, { 
+  prefix: '/payments',
+  preHandler: authMiddleware 
+});
+
+// Webhook routes (no auth - uses Stripe signature verification)
 await fastify.register(webhookRoutes, { prefix: '/webhooks' });
 
+// Global error handler
+fastify.setErrorHandler(async (error, request, reply) => {
+  fastify.log.error(error);
+  
+  // Type guard for error object
+  const isError = (err: unknown): err is Error => {
+    return err instanceof Error;
+  };
+
+  // Type guard for validation errors
+  const hasValidation = (err: unknown): err is Error & { validation: any } => {
+    return isError(err) && 'validation' in err;
+  };
+
+  // Type guard for HTTP errors with status codes
+  const hasStatusCode = (err: unknown): err is Error & { statusCode: number } => {
+    return isError(err) && 'statusCode' in err && typeof (err as any).statusCode === 'number';
+  };
+  
+  // Handle validation errors
+  if (hasValidation(error)) {
+    reply.status(400).send({
+      success: false,
+      error: 'Validation Error',
+      message: error.message,
+      details: error.validation
+    });
+    return;
+  }
+
+  // Handle auth errors
+  if (hasStatusCode(error) && error.statusCode === 401) {
+    reply.status(401).send({
+      success: false,
+      error: 'Unauthorized',
+      message: 'Authentication required'
+    });
+    return;
+  }
+
+  // Handle other HTTP errors
+  if (hasStatusCode(error) && error.statusCode < 500) {
+    reply.status(error.statusCode).send({
+      success: false,
+      error: error.name || 'Client Error',
+      message: error.message
+    });
+    return;
+  }
+
+  // Handle server errors
+  const errorMessage = isError(error) ? error.message : 'Unknown server error';
+  reply.status(500).send({
+    success: false,
+    error: 'Internal Server Error',
+    message: process.env.NODE_ENV === 'production' ? 'Something went wrong' : errorMessage
+  });
+});
+
+// Start server
 const start = async () => {
   try {
-    const port = parseInt(process.env.PORT || '3001', 10);
-    await fastify.listen({ port, host: '0.0.0.0' });
+    const port = Number(process.env.PORT) || 3001;
+    const host = process.env.HOST || '0.0.0.0';
     
-    console.log(`🚀 CA2AChain API Server running on port ${port}`);
-    console.log(`📊 Health check: http://localhost:${port}/health`);
-    console.log(`📖 API docs: http://localhost:${port}/api`);
-    console.log(`🔐 Environment: ${process.env.NODE_ENV || 'development'}`);
-  } catch (err) {
-    fastify.log.error(err);
+    await fastify.listen({ port, host });
+    console.log(`🚀 CA2AChain API server listening on port ${port}`);
+    console.log(`📚 Environment: ${process.env.NODE_ENV || 'development'}`);
+  } catch (error) {
+    fastify.log.error(error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    console.error(`❌ Server startup failed: ${errorMessage}`);
     process.exit(1);
   }
 };
