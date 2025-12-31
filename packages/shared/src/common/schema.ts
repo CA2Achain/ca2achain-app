@@ -19,6 +19,9 @@ export const dateOfBirthSchema = z.string()
     return age >= 0 && age <= 120; // Reasonable age range
   }, 'Invalid date of birth');
 
+// Standard timestamp format (ISO 8601)
+export const timestampSchema = z.string().datetime();
+
 // Address structure for consistent address handling
 export const addressSchema = z.object({
   street: z.string().min(1, 'Street address is required'),

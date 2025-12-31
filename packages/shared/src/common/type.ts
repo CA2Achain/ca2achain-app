@@ -6,6 +6,7 @@ import {
   addressStringSchema,
   phoneNumberSchema,
   dateOfBirthSchema,
+  timestampSchema,
   paymentStatusSchema,
   creditCardInfoSchema,
   stripeInfoSchema,
