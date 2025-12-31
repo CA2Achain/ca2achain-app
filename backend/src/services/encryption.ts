@@ -6,6 +6,9 @@ import type {
   HashReproducibilityData
 } from '@ca2achain/shared';
 
+// Import Supabase client for vault access
+import { createClient } from '@supabase/supabase-js';
+
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const SALT_LENGTH = 64;
@@ -13,23 +16,41 @@ const TAG_LENGTH = 16;
 const KEY_LENGTH = 32;
 const ITERATIONS = 100000;
 
-// Derive encryption key from master key
-const deriveKey = (password: string, salt: Buffer): Buffer => {
-  return crypto.pbkdf2Sync(password, salt, ITERATIONS, KEY_LENGTH, 'sha512');
+// Initialize Supabase client for vault access
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+// Get encryption key from Supabase vault
+const getVaultEncryptionKey = async (keyId: string): Promise<string> => {
+  const { data, error } = await supabase
+    .from('vault.decrypted_secrets')
+    .select('decrypted_secret')
+    .eq('id', keyId)
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Failed to retrieve vault encryption key: ${error?.message}`);
+  }
+
+  return data.decrypted_secret;
+};
+
+// Derive encryption key from vault key
+const deriveKey = (vaultKey: string, salt: Buffer): Buffer => {
+  return crypto.pbkdf2Sync(vaultKey, salt, ITERATIONS, KEY_LENGTH, 'sha512');
 };
 
 // =============================================
 // CORE ENCRYPTION/DECRYPTION
 // =============================================
 
-export const encrypt = (text: string): string => {
-  const masterKey = process.env.ENCRYPTION_KEY;
-  if (!masterKey) {
-    throw new Error('ENCRYPTION_KEY not set');
-  }
-
+export const encrypt = async (text: string, vaultKeyId: string): Promise<string> => {
+  const vaultKey = await getVaultEncryptionKey(vaultKeyId);
+  
   const salt = crypto.randomBytes(SALT_LENGTH);
-  const key = deriveKey(masterKey, salt);
+  const key = deriveKey(vaultKey, salt);
   const iv = crypto.randomBytes(IV_LENGTH);
   
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
@@ -45,11 +66,8 @@ export const encrypt = (text: string): string => {
   return combined.toString('base64');
 };
 
-export const decrypt = (encryptedData: string): string => {
-  const masterKey = process.env.ENCRYPTION_KEY;
-  if (!masterKey) {
-    throw new Error('ENCRYPTION_KEY not set');
-  }
+export const decrypt = async (encryptedData: string, vaultKeyId: string): Promise<string> => {
+  const vaultKey = await getVaultEncryptionKey(vaultKeyId);
 
   const combined = Buffer.from(encryptedData, 'base64');
   
@@ -58,7 +76,7 @@ export const decrypt = (encryptedData: string): string => {
   const tag = combined.subarray(SALT_LENGTH + IV_LENGTH, SALT_LENGTH + IV_LENGTH + TAG_LENGTH);
   const encrypted = combined.subarray(SALT_LENGTH + IV_LENGTH + TAG_LENGTH);
   
-  const key = deriveKey(masterKey, salt);
+  const key = deriveKey(vaultKey, salt);
   
   const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(tag);
@@ -84,8 +102,17 @@ export const generateApiKey = (): string => {
 };
 
 // =============================================
-// BUYER SECRETS ENCRYPTION (NEW SCHEMA)
+// BUYER SECRETS ENCRYPTION
 // =============================================
+
+// Get vault encryption key ID from environment
+export const getVaultKeyId = (): string => {
+  const keyId = process.env.VAULT_ENCRYPTION_KEY_ID;
+  if (!keyId) {
+    throw new Error('VAULT_ENCRYPTION_KEY_ID not set in environment');
+  }
+  return keyId;
+};
 
 // Generate unique encryption key ID for tracking
 export const generateEncryptionKeyId = (): string => {
@@ -93,8 +120,8 @@ export const generateEncryptionKeyId = (): string => {
 };
 
 // Encrypt Persona data for buyer_secrets table
-export const encryptPersonaData = (driverLicenseData: DriverLicenseData, personaSessionId: string): EncryptedPersonaData => {
-  return {
+export const encryptPersonaData = async (driverLicenseData: DriverLicenseData, personaSessionId: string, vaultKeyId: string): Promise<string> => {
+  const personaData: EncryptedPersonaData = {
     driver_license: {
       dl_number: driverLicenseData.dl_number,
       date_of_birth: driverLicenseData.date_of_birth,
@@ -105,22 +132,24 @@ export const encryptPersonaData = (driverLicenseData: DriverLicenseData, persona
     },
     persona_session_id: personaSessionId,
   };
+  
+  return await encrypt(JSON.stringify(personaData), vaultKeyId);
 };
 
 // Decrypt Persona data from buyer_secrets table
-export const decryptPersonaData = (encryptedData: string): EncryptedPersonaData => {
-  const decryptedJson = decrypt(encryptedData);
+export const decryptPersonaData = async (encryptedData: string, vaultKeyId: string): Promise<EncryptedPersonaData> => {
+  const decryptedJson = await decrypt(encryptedData, vaultKeyId);
   return JSON.parse(decryptedJson) as EncryptedPersonaData;
 };
 
 // Encrypt Privado credential for buyer_secrets table
-export const encryptPrivadoCredential = (credential: EncryptedPrivadoCredential): string => {
-  return encrypt(JSON.stringify(credential));
+export const encryptPrivadoCredential = async (credential: EncryptedPrivadoCredential, vaultKeyId: string): Promise<string> => {
+  return await encrypt(JSON.stringify(credential), vaultKeyId);
 };
 
 // Decrypt Privado credential from buyer_secrets table
-export const decryptPrivadoCredential = (encryptedCredential: string): EncryptedPrivadoCredential => {
-  const decryptedJson = decrypt(encryptedCredential);
+export const decryptPrivadoCredential = async (encryptedCredential: string, vaultKeyId: string): Promise<EncryptedPrivadoCredential> => {
+  const decryptedJson = await decrypt(encryptedCredential, vaultKeyId);
   return JSON.parse(decryptedJson) as EncryptedPrivadoCredential;
 };
 
