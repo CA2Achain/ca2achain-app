@@ -46,7 +46,13 @@ export const createBuyerInquiry = async (buyerId: string): Promise<{ inquiryId: 
       throw new Error(`Persona API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
+    
+    // Type guard for Persona API response
+    if (!data?.data?.id || !data?.data?.attributes?.['session-token']) {
+      throw new Error('Invalid Persona API response format');
+    }
+    
     console.log(`✅ Persona inquiry created for buyer ${buyerId}: ${data.data.id}`);
     
     return {
@@ -81,20 +87,26 @@ export const getVerificationData = async (inquiryId: string): Promise<EncryptedP
       throw new Error(`Persona API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
+    
+    // Type guard for Persona API response
+    if (!data?.data) {
+      throw new Error('Invalid Persona API response format');
+    }
+    
     const inquiry = data.data;
 
     // Check if verification is complete and approved
-    if (inquiry.attributes.status !== 'completed' || inquiry.attributes['decision-status'] !== 'approved') {
-      console.log(`⏳ Verification not complete for inquiry ${inquiryId}: ${inquiry.attributes.status}`);
+    if (inquiry.attributes?.status !== 'completed' || inquiry.attributes?.['decision-status'] !== 'approved') {
+      console.log(`⏳ Verification not complete for inquiry ${inquiryId}: ${inquiry.attributes?.status || 'unknown'}`);
       return null;
     }
 
     // Extract driver's license data from verification results
     const verifications = data.included?.filter((item: any) => item.type === 'verification') || [];
     const documentVerification = verifications.find((v: any) => 
-      v.attributes['verification-template']?.name?.includes('government-id') ||
-      v.attributes['document-type'] === 'drivers-license'
+      v.attributes?.['verification-template']?.name?.includes('government-id') ||
+      v.attributes?.['document-type'] === 'drivers-license'
     );
 
     if (!documentVerification) {
@@ -102,7 +114,7 @@ export const getVerificationData = async (inquiryId: string): Promise<EncryptedP
     }
 
     // Extract verified data using existing schema structure
-    const extractedData = documentVerification.attributes.extracted;
+    const extractedData = documentVerification.attributes?.extracted || {};
     
     const personaData: EncryptedPersonaData = {
       driver_license: {
@@ -156,10 +168,15 @@ export const getInquiryStatus = async (inquiryId: string): Promise<{ status: str
       throw new Error(`Persona API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
+    
+    // Type guard for Persona API response
+    if (!data?.data?.attributes) {
+      throw new Error('Invalid Persona API response format');
+    }
     
     return {
-      status: data.data.attributes.status,
+      status: data.data.attributes.status || 'unknown',
       decision: data.data.attributes['decision-status']
     };
 
