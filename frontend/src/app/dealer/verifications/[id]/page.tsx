@@ -1,4 +1,8 @@
-// TODO: Implement single verification detail view with blockchain proof
-export default function DealerVerificationDetailPage() {
+// TODO: Implement compliance event detail page
+export default function ComplianceEventDetailPage({ 
+  params 
+}: { 
+  params: { id: string } 
+}) {
   return null
 }

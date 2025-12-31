@@ -1,8 +1,10 @@
-import { ButtonHTMLAttributes } from 'react'
+import { ButtonHTMLAttributes, ReactNode } from 'react'
 import { classNames } from '@/lib/utils/classnames'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'outline'
+  className?: string
+  children?: ReactNode
 }
 
 export default function Button({ 
