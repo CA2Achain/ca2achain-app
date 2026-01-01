@@ -1,32 +1,75 @@
 'use client'
 
 import Link from 'next/link'
+import { useAuth } from '@/lib/hooks/useAuth'
+import { ROUTES } from '@/lib/constants/routes'
 
 export default function Header() {
-  // TODO: Add auth state detection to show/hide role-specific nav
-  // TODO: Get current user role (buyer/dealer/admin)
+  const { isAuthenticated, role } = useAuth()
   
   return (
     <header>
       {/* Main navigation - always visible */}
-      <nav className="bg-white border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <nav className="border-b">
+        <div className="max-w-7xl mx-auto px-4">
           <div className="flex justify-between h-16 items-center">
-            <Link href="/" className="font-bold text-xl">
-              CA2AChain
-            </Link>
-            <div className="flex gap-6">
-              <Link href="/public/about">About</Link>
-              <Link href="/public/how-it-works">How It Works</Link>
-              <Link href="/public/pricing">Pricing</Link>
-              <Link href="/auth/login">Login</Link>
-            </div>
+            <Link href={ROUTES.HOME}>CA2AChain</Link>
+            
+            {!isAuthenticated && (
+              <div className="flex gap-6">
+                <Link href={ROUTES.ABOUT}>About</Link>
+                <Link href={ROUTES.HOW_IT_WORKS}>How It Works</Link>
+                <Link href={ROUTES.PRICING}>Pricing</Link>
+                <Link href={ROUTES.LOGIN}>Login</Link>
+              </div>
+            )}
+            
+            {isAuthenticated && (
+              <div className="flex gap-6">
+                <Link href={ROUTES.ABOUT}>About</Link>
+                <button onClick={() => {/* TODO: logout */}}>Logout</button>
+              </div>
+            )}
           </div>
         </div>
       </nav>
 
-      {/* Role-specific navigation - shows when authenticated */}
-      {/* TODO: Conditionally render based on user role */}
+      {/* Role-specific sub-navigation */}
+      {isAuthenticated && role === 'buyer' && (
+        <nav className="border-b bg-gray-50">
+          <div className="max-w-7xl mx-auto px-4">
+            <div className="flex gap-6 h-12 items-center">
+              <Link href={ROUTES.BUYER_PROFILE}>Profile</Link>
+              <Link href={ROUTES.BUYER_VERIFY_IDENTITY}>Verify Identity</Link>
+              <Link href={ROUTES.BUYER_SETTINGS}>Settings</Link>
+            </div>
+          </div>
+        </nav>
+      )}
+
+      {isAuthenticated && role === 'dealer' && (
+        <nav className="border-b bg-gray-50">
+          <div className="max-w-7xl mx-auto px-4">
+            <div className="flex gap-6 h-12 items-center">
+              <Link href={ROUTES.DEALER_PROFILE}>Profile</Link>
+              <Link href={ROUTES.DEALER_VERIFICATIONS}>Verifications</Link>
+              <Link href={ROUTES.DEALER_BILLING}>Billing</Link>
+              <Link href={ROUTES.DEALER_SETTINGS}>Settings</Link>
+            </div>
+          </div>
+        </nav>
+      )}
+
+      {isAuthenticated && role === 'admin' && (
+        <nav className="border-b bg-gray-50">
+          <div className="max-w-7xl mx-auto px-4">
+            <div className="flex gap-6 h-12 items-center">
+              <Link href={ROUTES.ADMIN_DASHBOARD}>Dashboard</Link>
+              <Link href={ROUTES.ADMIN_COMPLIANCE}>Compliance Events</Link>
+            </div>
+          </div>
+        </nav>
+      )}
     </header>
   )
 }
