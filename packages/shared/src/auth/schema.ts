@@ -10,10 +10,15 @@ export const supabaseAuthUserSchema = z.object({
   // Supabase has many other fields, but these are the ones we use
 });
 
-// Login/registration requests (magic link)
+// Login request (magic link) - email only
+// Role is determined by backend from user_roles table
 export const authLoginSchema = z.object({
   email: z.string().email(),
-  account_type: z.enum(['buyer', 'dealer']), // Determines which account table to create
+});
+
+// Role selection during registration (Option A flow)
+export const roleSelectionSchema = z.object({
+  role: z.enum(['buyer', 'dealer']),
 });
 
 // Magic link verification callback
