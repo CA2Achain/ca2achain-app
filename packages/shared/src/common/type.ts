@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { 
   envSchema,
+  emailSchema,
   addressSchema,
   normalizedAddressSchema,
   addressStringSchema,
@@ -17,6 +18,9 @@ import {
 // =============================================
 // BASIC STRUCTURE TYPES
 // =============================================
+
+// Email type
+export type Email = z.infer<typeof emailSchema>;
 
 // Address types for consistent address handling
 export type Address = z.infer<typeof addressSchema>;

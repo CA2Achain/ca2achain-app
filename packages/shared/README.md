@@ -51,3 +51,9 @@ Transaction_Link_Hash = SHA256(JSON.stringify(transactionLink));
 
 ### Purpose
 Provides cryptographic non-repudiation for AB 1263 compliance verification using Zero-Knowledge Proofs and blockchain immutability for court audit purposes.
+
+## Build packages
+
+```
+pnpm run build
+```

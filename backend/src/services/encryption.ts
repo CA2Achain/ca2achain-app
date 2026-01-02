@@ -7,7 +7,7 @@ import type {
 } from '@ca2achain/shared';
 
 // Import Supabase client for vault access
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
@@ -16,14 +16,26 @@ const TAG_LENGTH = 16;
 const KEY_LENGTH = 32;
 const ITERATIONS = 100000;
 
-// Initialize Supabase client for vault access
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Lazy-load Supabase client for vault access (after dotenv loads)
+let supabaseClient: SupabaseClient | null = null;
+
+const getSupabaseClient = (): SupabaseClient => {
+  if (!supabaseClient) {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in environment');
+    }
+    supabaseClient = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+  }
+  return supabaseClient;
+};
 
 // Get encryption key from Supabase vault
 const getVaultEncryptionKey = async (keyId: string): Promise<string> => {
+  const supabase = getSupabaseClient();
+  
   const { data, error } = await supabase
     .from('vault.decrypted_secrets')
     .select('decrypted_secret')

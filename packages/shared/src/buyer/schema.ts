@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { phoneNumberSchema, paymentStatusSchema } from '../common/schema.js';
+import { emailSchema, phoneNumberSchema, paymentStatusSchema } from '../common/schema.js';
 
 // =============================================
 // BUYER ACCOUNT MANAGEMENT
@@ -9,8 +9,11 @@ import { phoneNumberSchema, paymentStatusSchema } from '../common/schema.js';
 export const buyerRegistrationSchema = z.object({
   first_name: z.string().min(1, 'First name is required'),
   last_name: z.string().min(1, 'Last name is required'),
-  email: z.string().email('Valid email required'),
-  phone: phoneNumberSchema.optional(), // Use common phone validation
+  email: emailSchema,
+  phone: z.union([
+    z.literal(''), // Accept empty string
+    phoneNumberSchema
+  ]).optional(),
 });
 
 // Complete buyer account database entity schema

@@ -4,6 +4,9 @@ import { z } from 'zod';
 // BASIC STRUCTURES
 // =============================================
 
+// Email validation
+export const emailSchema = z.string().email('Valid email address required');
+
 // Phone number validation (US format)
 export const phoneNumberSchema = z.string()
   .regex(/^\+?1?[-.\s]?\(?[2-9]\d{2}\)?[-.\s]?\d{3}[-.\s]?\d{4}$/, 'Valid US phone number required')
