@@ -2,12 +2,13 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { getClient } from '../services/database/connection.js';
 import { getBuyerByAuth } from '../services/database/buyer-accounts.js';
 import { getDealerByAuth } from '../services/database/dealer-accounts.js';
+import { getUserRole } from '../services/database/user-roles.js';
 import type { BuyerAccount, DealerAccount } from '@ca2achain/shared';
 
 export interface AuthUser {
   id: string;
   email: string;
-  account_type: 'buyer' | 'dealer' | null;
+  role: 'buyer' | 'dealer' | null;
   account_data: BuyerAccount | DealerAccount | null;
 }
 
@@ -46,36 +47,23 @@ export async function authMiddleware(
       });
     }
 
-    // Try to find buyer account first
-    const buyerAccountData = await getBuyerByAuth(user.id);
-    if (buyerAccountData) {
-      request.user = {
-        id: user.id,
-        email: user.email!,
-        account_type: 'buyer',
-        account_data: buyerAccountData
-      };
-      return;
+    // Get role from user_roles table (single source of truth)
+    const role = await getUserRole(user.id);
+
+    // Get account data based on role
+    let accountData = null;
+    if (role === 'buyer') {
+      accountData = await getBuyerByAuth(user.id);
+    } else if (role === 'dealer') {
+      accountData = await getDealerByAuth(user.id);
     }
 
-    // Try dealer account
-    const dealerAccountData = await getDealerByAuth(user.id);
-    if (dealerAccountData) {
-      request.user = {
-        id: user.id,
-        email: user.email!,
-        account_type: 'dealer',
-        account_data: dealerAccountData
-      };
-      return;
-    }
-
-    // User exists in auth but no account created yet
+    // Set user on request
     request.user = {
       id: user.id,
       email: user.email!,
-      account_type: null,
-      account_data: null
+      role: role,
+      account_data: accountData
     };
 
   } catch (error) {

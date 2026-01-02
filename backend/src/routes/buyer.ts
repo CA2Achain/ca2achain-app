@@ -14,54 +14,69 @@ import {
 } from '@ca2achain/shared';
 
 export default async function buyerRoutes(fastify: FastifyInstance) {
-  // Buyer registration (creates buyer_accounts entry linked to auth.users)
-  fastify.post('/register', {
+  // Complete buyer profile (authenticated - after email verification)
+  fastify.post('/complete-profile', {
     ...createRouteSchema({
       tags: ['buyer'],
-      summary: 'Register new buyer account',
-      description: 'Create a new buyer account linked to authenticated user',
+      summary: 'Complete buyer profile after email verification',
+      description: 'Creates buyer_accounts entry after user verifies email',
       security: authRequired,
       body: {
         type: 'object',
         properties: {
           first_name: { type: 'string', minLength: 1 },
           last_name: { type: 'string', minLength: 1 },
-          email: { type: 'string', format: 'email' },
-          phone: { type: 'string', pattern: '^[0-9]{10}$' }
+          phone: { type: 'string' }
         },
-        required: ['first_name', 'last_name', 'email']
+        required: ['first_name', 'last_name']
       },
       response: {
-        description: 'Buyer account created successfully',
+        description: 'Profile completed successfully',
         type: 'object',
         properties: {
           success: { type: 'boolean', enum: [true] },
-          data: { type: 'object', properties: { id: { type: 'string' }, first_name: { type: 'string' }, verification_status: { type: 'string' } } }
+          data: { 
+            type: 'object', 
+            properties: { 
+              id: { type: 'string' },
+              buyer_reference_id: { type: 'string' },
+              verification_status: { type: 'string' }
+            } 
+          }
         }
       }
     }),
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const registrationData = buyerRegistrationSchema.parse(request.body) as BuyerRegistration;
+      // Verify user has buyer role
+      if (request.user!.role !== 'buyer') {
+        return sendError(reply, 'Only buyers can access this endpoint', 403);
+      }
 
-      // Check if buyer already exists for this auth user
+      const profileData = buyerRegistrationSchema.parse(request.body) as BuyerRegistration;
+
+      // Check if buyer account already exists
       const existingBuyer = await getBuyerByAuth(request.user!.id);
       if (existingBuyer) {
         return sendError(reply, 'Buyer account already exists', 400);
       }
 
-      // Create buyer account linked to auth user
-      const buyer = await createBuyer(request.user!.id, registrationData);
+      // Create buyer account
+      const buyer = await createBuyer(request.user!.id, profileData);
 
-      return sendSuccess(reply, buyer, 201);
+      return sendSuccess(reply, {
+        id: buyer.id,
+        buyer_reference_id: buyer.buyer_reference_id,
+        verification_status: buyer.verification_status
+      }, 201);
 
     } catch (error) {
-      console.error('Buyer registration error:', error);
+      console.error('Complete buyer profile error:', error);
       if (error instanceof Error && error.name === 'ZodError') {
-        return sendValidationError(reply, 'Invalid registration data');
+        return sendValidationError(reply, 'Invalid profile data');
       }
-      return sendError(reply, 'Failed to create buyer account', 500);
+      return sendError(reply, 'Failed to complete buyer profile', 500);
     }
   });
 
@@ -90,7 +105,7 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
 
       const buyer = request.user.account_data;
       if (!buyer) {
-        return sendError(reply, 'Buyer account not found', 404);
+        return sendError(reply, 'Profile not completed. Please complete your profile first.', 403);
       }
 
       return sendSuccess(reply, buyer, 200);

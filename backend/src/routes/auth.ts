@@ -1,14 +1,15 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { sendMagicLink, getUserFromToken, verifyOtp } from '../services/auth.js';
-import { authLoginSchema, authCallbackSchema, type AuthLogin } from '@ca2achain/shared';
+import { registerUser, sendLoginOtp, verifyOtp, getUserFromToken, createUserRoleAfterVerification } from '../services/auth.js';
+import { getUserRole } from '../services/database/user-roles.js';
+import { authLoginSchema, roleSelectionSchema } from '@ca2achain/shared';
 import { createRouteSchema, sendSuccess, sendError, sendValidationError, authRequired } from '../utils/api-responses.js';
 
 export default async function authRoutes(fastify: FastifyInstance) {
-  // Send magic link for login/register (follows authLoginSchema exactly)
-  fastify.post('/login', createRouteSchema({
+  // Register new user with role (sends OTP)
+  fastify.post('/register', createRouteSchema({
     tags: ['auth'],
-    summary: 'Send magic link',
-    description: 'Send magic link for passwordless login. Account type determines which table to create after auth.',
+    summary: 'Register new user',
+    description: 'Register new user with email and role. Sends OTP to email.',
     body: {
       type: 'object',
       properties: {
@@ -17,16 +18,16 @@ export default async function authRoutes(fastify: FastifyInstance) {
           format: 'email',
           description: 'User email address'
         },
-        account_type: { 
+        role: { 
           type: 'string', 
           enum: ['buyer', 'dealer'],
-          description: 'Account type for new registrations'
+          description: 'User role - buyer or dealer'
         }
       },
-      required: ['email', 'account_type']
+      required: ['email', 'role']
     },
     response: {
-      description: 'Magic link sent successfully',
+      description: 'OTP sent successfully',
       type: 'object',
       properties: {
         success: { type: 'boolean', enum: [true] },
@@ -41,43 +42,108 @@ export default async function authRoutes(fastify: FastifyInstance) {
     }
   }), async (request, reply) => {
     try {
-      const body = authLoginSchema.parse(request.body) as AuthLogin;
+      const { email, role } = request.body as { email: string, role: 'buyer' | 'dealer' };
 
-      // Send magic link with account type
-      await sendMagicLink(body.email, body.account_type);
+      // Validate inputs
+      authLoginSchema.parse({ email });
+      roleSelectionSchema.parse({ role });
+
+      // Register user and send OTP
+      await registerUser(email, role);
 
       return sendSuccess(reply, {
-        email: body.email,
-        message: 'Magic link sent to your email'
+        email,
+        message: `Verification code sent to ${email}`
       }, 200);
 
-    } catch (error) {
-      console.error('Auth login error:', error);
-      if (error instanceof Error && error.name === 'ZodError') {
-        return sendValidationError(reply, 'Invalid email format or account type');
+    } catch (error: any) {
+      console.error('Register error:', error);
+      if (error.message?.includes('already exists')) {
+        return sendError(reply, 'Email already registered. Please use login instead.', 400);
       }
-      return sendError(reply, 'Failed to send magic link', 500);
+      if (error.name === 'ZodError') {
+        return sendValidationError(reply, 'Invalid email or role');
+      }
+      return sendError(reply, 'Failed to register user', 500);
     }
   });
 
-  // Verify magic link token (follows authCallbackSchema)
-  fastify.post('/verify', createRouteSchema({
+  // Login existing user (sends OTP)
+  fastify.post('/login', createRouteSchema({
     tags: ['auth'],
-    summary: 'Verify magic link token',
-    description: 'Verify the magic link token and return authentication session',
+    summary: 'Login existing user',
+    description: 'Send OTP to existing user email',
     body: {
       type: 'object',
       properties: {
-        token: { 
-          type: 'string',
-          description: 'Magic link token from email'
-        },
-        type: {
-          type: 'string',
-          enum: ['magiclink']
+        email: { 
+          type: 'string', 
+          format: 'email',
+          description: 'User email address'
         }
       },
-      required: ['token', 'type']
+      required: ['email']
+    },
+    response: {
+      description: 'OTP sent successfully',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', enum: [true] },
+        data: {
+          type: 'object',
+          properties: {
+            email: { type: 'string', format: 'email' },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }), async (request, reply) => {
+    try {
+      const { email } = authLoginSchema.parse(request.body);
+
+      // Send OTP to existing user
+      await sendLoginOtp(email);
+
+      return sendSuccess(reply, {
+        email,
+        message: `Verification code sent to ${email}`
+      }, 200);
+
+    } catch (error) {
+      console.error('Login error:', error);
+      if (error instanceof Error && error.name === 'ZodError') {
+        return sendValidationError(reply, 'Invalid email format');
+      }
+      return sendError(reply, 'Failed to send verification code', 500);
+    }
+  });
+
+  // Verify OTP code
+  fastify.post('/verify-otp', createRouteSchema({
+    tags: ['auth'],
+    summary: 'Verify OTP code',
+    description: 'Verify 6-digit OTP code and return JWT token with role',
+    body: {
+      type: 'object',
+      properties: {
+        email: { 
+          type: 'string', 
+          format: 'email',
+          description: 'User email address'
+        },
+        token: {
+          type: 'string',
+          description: '6-digit OTP code',
+          pattern: '^[0-9]{6}$'
+        },
+        role: {
+          type: 'string',
+          enum: ['buyer', 'dealer'],
+          description: 'Role for new users (only needed if registering)'
+        }
+      },
+      required: ['email', 'token']
     },
     response: {
       description: 'Authentication successful',
@@ -87,66 +153,80 @@ export default async function authRoutes(fastify: FastifyInstance) {
         data: {
           type: 'object',
           properties: {
-            user: {
-              type: 'object',
-              properties: {
-                id: { type: 'string', format: 'uuid' },
-                email: { type: 'string', format: 'email' }
-              }
-            },
-            session: { type: 'object' },
-            account_type: { type: 'string', enum: ['buyer', 'dealer'], nullable: true }
+            access_token: { type: 'string' },
+            refresh_token: { type: 'string' },
+            role: { type: 'string', enum: ['buyer', 'dealer'] },
+            user: { type: 'object' }
           }
         }
       }
     }
   }), async (request, reply) => {
     try {
-      const { token, type } = authCallbackSchema.parse(request.body);
+      const { email, token, role } = request.body as { 
+        email: string, 
+        token: string,
+        role?: 'buyer' | 'dealer'
+      };
 
-      if (type !== 'magiclink') {
-        return sendValidationError(reply, 'Only magiclink type is supported');
+      // Verify OTP
+      const result = await verifyOtp(email, token);
+      
+      if (!result.user) {
+        return sendError(reply, 'Verification failed', 400);
       }
 
-      // Verify OTP token (for magic link, token is the actual JWT or session)
-      const authResult = await getUserFromToken(token);
+      // Check if user has role in user_roles table
+      let userRole = await getUserRole(result.user.id);
+
+      // If no role exists and role was provided, create it (new registration)
+      if (!userRole && role) {
+        await createUserRoleAfterVerification(result.user.id, role);
+        userRole = role;
+      }
+
+      // If still no role, something went wrong
+      if (!userRole) {
+        return sendError(reply, 'User role not found. Please register first.', 400);
+      }
 
       return sendSuccess(reply, {
+        access_token: result.session?.access_token,
+        refresh_token: result.session?.refresh_token,
+        role: userRole,
         user: {
-          id: authResult.supabaseUser.id,
-          email: authResult.supabaseUser.email
-        },
-        session: authResult.supabaseUser,
-        account_type: authResult.accountType
+          id: result.user.id,
+          email: result.user.email
+        }
       }, 200);
 
-    } catch (error) {
-      console.error('Token verification error:', error);
-      if (error instanceof Error && error.name === 'ZodError') {
-        return sendValidationError(reply, 'Invalid token format');
+    } catch (error: any) {
+      console.error('Verify OTP error:', error);
+      if (error.message?.includes('expired') || error.message?.includes('invalid')) {
+        return sendError(reply, 'Invalid or expired verification code', 400);
       }
-      return sendError(reply, 'Invalid or expired token', 401);
+      return sendError(reply, 'Failed to verify code', 500);
     }
   });
 
-  // Get current user info (requires authentication)
+  // Get current user info (with role and account data)
   fastify.get('/me', {
     ...createRouteSchema({
       tags: ['auth'],
       summary: 'Get current user',
-      description: 'Get authenticated user information from supabaseAuthUserSchema',
+      description: 'Get authenticated user info with role and account data',
       security: authRequired,
       response: {
-        description: 'Current user information',
+        description: 'User information',
         type: 'object',
         properties: {
           success: { type: 'boolean', enum: [true] },
           data: {
             type: 'object',
             properties: {
-              id: { type: 'string', format: 'uuid' },
-              email: { type: 'string', format: 'email' },
-              account_type: { type: 'string', enum: ['buyer', 'dealer'], nullable: true },
+              id: { type: 'string' },
+              email: { type: 'string' },
+              role: { type: 'string', enum: ['buyer', 'dealer'], nullable: true },
               account_data: { 
                 type: 'object',
                 description: 'Buyer or dealer account data if exists',
@@ -165,50 +245,13 @@ export default async function authRoutes(fastify: FastifyInstance) {
       return sendSuccess(reply, {
         id: user.id,
         email: user.email,
-        account_type: user.account_type,
+        role: user.role,
         account_data: user.account_data
       }, 200);
 
     } catch (error) {
       console.error('Get user info error:', error);
-      return sendError(reply, 'Failed to get user information', 500);
-    }
-  });
-
-  // Sign out (client should handle token removal)
-  fastify.post('/logout', {
-    ...createRouteSchema({
-      tags: ['auth'],
-      summary: 'Sign out user',
-      description: 'Sign out authenticated user (client should remove token from storage)',
-      security: authRequired,
-      response: {
-        description: 'Signed out successfully',
-        type: 'object',
-        properties: {
-          success: { type: 'boolean', enum: [true] },
-          data: {
-            type: 'object',
-            properties: {
-              message: { type: 'string' }
-            }
-          }
-        }
-      }
-    }),
-    preHandler: fastify.authenticate
-  }, async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      // With Supabase JWT, server-side invalidation is not possible
-      // Client should remove token from storage
-      
-      return sendSuccess(reply, {
-        message: 'Signed out successfully'
-      }, 200);
-
-    } catch (error) {
-      console.error('Logout error:', error);
-      return sendError(reply, 'Failed to sign out', 500);
+      return sendError(reply, 'Failed to get user info', 500);
     }
   });
 }

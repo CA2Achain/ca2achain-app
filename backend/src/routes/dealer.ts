@@ -18,12 +18,12 @@ import {
 } from '@ca2achain/shared';
 
 export default async function dealerRoutes(fastify: FastifyInstance) {
-  // Dealer registration
-  fastify.post('/register', {
+  // Complete dealer profile (authenticated - after email verification)
+  fastify.post('/complete-profile', {
     ...createRouteSchema({
       tags: ['dealer'],
-      summary: 'Register new dealer account',
-      description: 'Create a new dealer account with business information',
+      summary: 'Complete dealer profile after email verification',
+      description: 'Create dealer_accounts entry after user verifies email',
       security: authRequired,
       body: {
         type: 'object',
@@ -57,6 +57,11 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
+      // Verify user has dealer role
+      if (request.user!.role !== 'dealer') {
+        return sendError(reply, 'Only dealers can access this endpoint', 403);
+      }
+
       const registrationData = dealerRegistrationSchema.parse(request.body) as DealerRegistration;
 
       // Check if dealer already exists for this auth user
@@ -81,7 +86,7 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
       return sendSuccess(reply, dealer, 201);
 
     } catch (error) {
-      console.error('Dealer registration error:', error);
+      console.error('Dealer complete-profile error:', error);
       if (error instanceof Error && error.name === 'ZodError') {
         return sendValidationError(reply, 'Invalid registration data');
       }

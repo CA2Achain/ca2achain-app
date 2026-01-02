@@ -45,6 +45,9 @@ await fastify.register(cors, {
   allowedHeaders: ['Content-Type', 'Authorization'],
 });
 
+// Register auth middleware as decorator
+fastify.decorate('authenticate', authMiddleware);
+
 // Health check routes (no auth required)
 await fastify.register(healthRoutes);
 
