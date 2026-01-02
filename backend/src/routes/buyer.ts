@@ -99,7 +99,7 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'buyer') {
+      if (!request.user || request.user.role !== 'buyer') {
         return sendUnauthorized(reply, 'Buyer access required');
       }
 
@@ -143,7 +143,7 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'buyer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'buyer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Buyer access required');
       }
 
@@ -212,7 +212,7 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'buyer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'buyer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Buyer access required');
       }
 
@@ -255,7 +255,7 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'buyer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'buyer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Buyer access required');
       }
 
@@ -291,7 +291,7 @@ export default async function buyerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'buyer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'buyer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Buyer access required');
       }
 

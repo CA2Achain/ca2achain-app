@@ -142,8 +142,8 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
       }
 
       // Temporarily decrypt buyer data for verification (CCPA compliant - data not stored)
-      const decryptedPersonaData = decryptPersonaData(JSON.stringify(buyerSecrets.encrypted_persona_data));
-      const decryptedPrivadoCredential = decryptPrivadoCredential(JSON.stringify(buyerSecrets.encrypted_privado_credential));
+      const decryptedPersonaData = await decryptPersonaData(JSON.stringify(buyerSecrets.encrypted_persona_data), buyerSecrets.encryption_key_id);
+      const decryptedPrivadoCredential = await decryptPrivadoCredential(JSON.stringify(buyerSecrets.encrypted_privado_credential), buyerSecrets.encryption_key_id);
 
       // Generate compliance event ID for audit trail (AB1263 requirement)
       const complianceEventId = require('crypto').randomUUID();

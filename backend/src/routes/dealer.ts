@@ -113,7 +113,7 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'dealer') {
+      if (!request.user || request.user.role !== 'dealer') {
         return sendUnauthorized(reply, 'Dealer access required');
       }
 
@@ -166,7 +166,7 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'dealer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'dealer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Dealer access required');
       }
 
@@ -233,7 +233,7 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'dealer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'dealer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Dealer access required');
       }
 
@@ -290,7 +290,7 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'dealer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'dealer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Dealer access required');
       }
 
@@ -348,7 +348,7 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'dealer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'dealer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Dealer access required');
       }
 
@@ -398,7 +398,7 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'dealer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'dealer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Dealer access required');
       }
 
@@ -424,7 +424,7 @@ export default async function dealerRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'dealer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'dealer' || !request.user.account_data) {
         return sendUnauthorized(reply, 'Dealer access required');
       }
 

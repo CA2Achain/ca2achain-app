@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { registerUser, sendLoginOtp, verifyOtp, getUserFromToken, createUserRoleAfterVerification } from '../services/auth.js';
+import { registerUser, sendLoginOtp, verifyOtp, getUserFromToken } from '../services/auth.js';
 import { getUserRole } from '../services/database/user-roles.js';
 import { authLoginSchema, roleSelectionSchema } from '@ca2achain/shared';
 import { createRouteSchema, sendSuccess, sendError, sendValidationError, authRequired } from '../utils/api-responses.js';
@@ -136,11 +136,6 @@ export default async function authRoutes(fastify: FastifyInstance) {
           type: 'string',
           description: '6-digit OTP code',
           pattern: '^[0-9]{6}$'
-        },
-        role: {
-          type: 'string',
-          enum: ['buyer', 'dealer'],
-          description: 'Role for new users (only needed if registering)'
         }
       },
       required: ['email', 'token']
@@ -163,10 +158,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
     }
   }), async (request, reply) => {
     try {
-      const { email, token, role } = request.body as { 
+      const { email, token } = request.body as { 
         email: string, 
-        token: string,
-        role?: 'buyer' | 'dealer'
+        token: string
       };
 
       // Verify OTP
@@ -176,16 +170,10 @@ export default async function authRoutes(fastify: FastifyInstance) {
         return sendError(reply, 'Verification failed', 400);
       }
 
-      // Check if user has role in user_roles table
-      let userRole = await getUserRole(result.user.id);
+      // Get role from user_roles table (should already exist from registration)
+      const userRole = await getUserRole(result.user.id);
 
-      // If no role exists and role was provided, create it (new registration)
-      if (!userRole && role) {
-        await createUserRoleAfterVerification(result.user.id, role);
-        userRole = role;
-      }
-
-      // If still no role, something went wrong
+      // If no role exists, something went wrong
       if (!userRole) {
         return sendError(reply, 'User role not found. Please register first.', 400);
       }

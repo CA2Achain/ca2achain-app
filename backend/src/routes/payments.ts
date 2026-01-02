@@ -50,7 +50,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'buyer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'buyer' || !request.user.account_data) {
         return sendError(reply, 'Buyer access required', 403);
       }
 
@@ -112,7 +112,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || request.user.account_type !== 'dealer' || !request.user.account_data) {
+      if (!request.user || request.user.role !== 'dealer' || !request.user.account_data) {
         return sendError(reply, 'Dealer access required', 403);
       }
 
@@ -184,7 +184,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           data: {
             type: 'object',
             properties: {
-              account_type: { type: 'string', enum: ['buyer', 'dealer'] },
+              role: { type: 'string', enum: ['buyer', 'dealer'] },
               customer_reference_id: { type: 'string' },
               total_payments: { type: 'integer' },
               payments: {
@@ -208,7 +208,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     preHandler: fastify.authenticate
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      if (!request.user || !request.user.account_type || !request.user.account_data) {
+      if (!request.user || !request.user.role || !request.user.account_data) {
         return sendError(reply, 'Account not found', 404);
       }
 
@@ -217,7 +217,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       let customerReferenceId: string;
 
       // Get payments based on account type (using our database functions)
-      if (request.user.account_type === 'buyer') {
+      if (request.user.role === 'buyer') {
         const buyerData = accountData as BuyerAccount;
         payments = await getBuyerPaymentHistory(buyerData.id);
         customerReferenceId = buyerData.buyer_reference_id;
@@ -237,7 +237,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       // Format response following customerPaymentHistorySchema structure
       const response = {
-        account_type: request.user.account_type,
+        role: request.user.role,
         customer_reference_id: customerReferenceId,
         total_payments: payments.length,
         payments: payments.map(p => ({
@@ -282,9 +282,9 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       // Verify payment with Stripe (mock)
       let paymentResult: any = null;
       
-      if (request.user?.account_type === 'buyer') {
+      if (request.user?.role === 'buyer') {
         paymentResult = await verifyBuyerPayment(session_id);
-      } else if (request.user?.account_type === 'dealer') {
+      } else if (request.user?.role === 'dealer') {
         paymentResult = await verifyDealerSubscription(session_id);
       }
 

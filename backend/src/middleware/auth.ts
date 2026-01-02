@@ -50,11 +50,14 @@ export async function authMiddleware(
     // Get role from user_roles table (single source of truth)
     const role = await getUserRole(user.id);
 
+    // Cast to correct type
+    const userRole: 'buyer' | 'dealer' | null = role === 'buyer' || role === 'dealer' ? role : null;
+
     // Get account data based on role
     let accountData = null;
-    if (role === 'buyer') {
+    if (userRole === 'buyer') {
       accountData = await getBuyerByAuth(user.id);
-    } else if (role === 'dealer') {
+    } else if (userRole === 'dealer') {
       accountData = await getDealerByAuth(user.id);
     }
 
@@ -62,7 +65,7 @@ export async function authMiddleware(
     request.user = {
       id: user.id,
       email: user.email!,
-      role: role,
+      role: userRole,
       account_data: accountData
     };
 
