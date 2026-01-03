@@ -5,11 +5,11 @@ import { emailSchema, phoneNumberSchema, paymentStatusSchema } from '../common/s
 // BUYER ACCOUNT MANAGEMENT
 // =============================================
 
-// Buyer registration schema (for initial account creation)
+// Buyer registration schema (email optional - comes from authenticated user)
 export const buyerRegistrationSchema = z.object({
   first_name: z.string().min(1, 'First name is required'),
   last_name: z.string().min(1, 'Last name is required'),
-  email: emailSchema,
+  email: emailSchema.optional(), // Optional - authenticated user already has email
   phone: z.union([
     z.literal(''), // Accept empty string
     phoneNumberSchema

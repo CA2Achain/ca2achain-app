@@ -103,7 +103,7 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
       }
 
       // Check dealer credits before performing verification
-      if (dealer.credits_used >= (dealer.credits_purchased + dealer.additional_credits_purchased)) {
+      if (!dealer.credits_purchased || !dealer.credits_used || dealer.credits_used >= (dealer.credits_purchased + (dealer.additional_credits_purchased || 0))) {
         return sendInsufficientCredits(reply, 'Insufficient verification credits');
       }
 
@@ -290,7 +290,7 @@ export default async function verificationRoutes(fastify: FastifyInstance) {
       // Deduct dealer credit for verification
       await supabase
         .from('dealer_accounts')
-        .update({ credits_used: dealer.credits_used + 1 })
+        .update({ credits_used: (dealer.credits_used || 0) + 1 })
         .eq('id', dealer.id);
 
       // === RESPONSE (NO PII - CCPA COMPLIANT) ===

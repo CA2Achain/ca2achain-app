@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   dealerRegistrationSchema,
   dealerAccountSchema,
+  dealerSubscriptionSetupSchema,
   dealerSubscriptionUpdateSchema,
   dealerProfileUpdateSchema,
   dealerCreditPurchaseSchema,
@@ -12,6 +13,7 @@ import {
 // Inferred types from Zod schemas
 export type DealerRegistration = z.infer<typeof dealerRegistrationSchema>;
 export type DealerAccount = z.infer<typeof dealerAccountSchema>;
+export type DealerSubscriptionSetup = z.infer<typeof dealerSubscriptionSetupSchema>;
 export type DealerSubscriptionUpdate = z.infer<typeof dealerSubscriptionUpdateSchema>;
 export type DealerProfileUpdate = z.infer<typeof dealerProfileUpdateSchema>;
 export type DealerCreditPurchase = z.infer<typeof dealerCreditPurchaseSchema>;

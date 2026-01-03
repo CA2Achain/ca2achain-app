@@ -50,6 +50,15 @@ export async function apiKeyMiddleware(
       });
     }
 
+    // Check if dealer has activated subscription
+    if (!dealer.subscription_status) {
+      return reply.status(403).send({ 
+        success: false,
+        error: 'No active subscription',
+        message: 'Please activate your subscription to use the API'
+      });
+    }
+
     // Check subscription status
     if (!['active', 'trialing'].includes(dealer.subscription_status)) {
       return reply.status(403).send({ 
@@ -60,8 +69,16 @@ export async function apiKeyMiddleware(
       });
     }
 
-    // Check credit availability (new credit system)
-    const availableCredits = (dealer.credits_purchased + dealer.additional_credits_purchased) - dealer.credits_used;
+    // Check credit availability (credits can be null if no subscription)
+    if (dealer.credits_purchased === null || dealer.credits_used === null) {
+      return reply.status(402).send({ 
+        success: false,
+        error: 'No credits available',
+        message: 'Please setup your subscription to get credits.'
+      });
+    }
+
+    const availableCredits = (dealer.credits_purchased + (dealer.additional_credits_purchased || 0)) - dealer.credits_used;
     const creditsExpired = dealer.credits_expire_at && new Date(dealer.credits_expire_at) < new Date();
 
     if (availableCredits <= 0 || creditsExpired) {

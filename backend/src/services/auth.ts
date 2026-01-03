@@ -1,60 +1,126 @@
 import { getClient } from './database/connection.js';
 import { getBuyerByAuth } from './database/buyer-accounts.js';
 import { getDealerByAuth } from './database/dealer-accounts.js';
-import { getUserRole, createUserRole } from './database/user-roles.js';
+import { getUserRole, createUserRole, hasUserRole } from './database/user-roles.js';
 import type { BuyerAccount, DealerAccount } from '@ca2achain/shared';
 
-// Register new user with role (creates auth.users + user_roles entry, then sends OTP)
+// Check if user exists in BOTH auth.users AND user_roles (must be synced)
+async function userExists(email: string): Promise<{ exists: boolean; userId?: string; hasRole?: boolean }> {
+  const supabase = getClient();
+  
+  // Check auth.users by listing all users and filtering by email
+  const { data: usersData } = await supabase.auth.admin.listUsers();
+  const existingUser = usersData?.users?.find(u => u.email === email);
+  
+  if (!existingUser) {
+    return { exists: false };
+  }
+  
+  // Check user_roles
+  const hasRole = await hasUserRole(existingUser.id);
+  
+  return { 
+    exists: true, 
+    userId: existingUser.id,
+    hasRole 
+  };
+}
+
+// Register new user with magic link
 export const registerUser = async (email: string, role: 'buyer' | 'dealer') => {
   const supabase = getClient();
   
-  // Check if user already exists
-  const { data: existingUsers } = await supabase.auth.admin.listUsers();
-  const userExists = existingUsers?.users?.some(u => u.email === email);
+  // Step 1: Check if user already exists in auth.users OR user_roles
+  const existingUser = await userExists(email);
   
-  if (userExists) {
-    throw new Error('User already exists. Please use login instead.');
+  if (existingUser.exists) {
+    // User exists - they should use login instead
+    throw new Error('EXISTING_USER');
   }
-  
-  // Create auth user with admin API (generates random password, user will use OTP)
+
+  // Step 2: Create auth user (creates entry in auth.users)
   const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
     email,
-    email_confirm: false, // User must verify via OTP
-    user_metadata: { role } // Store role in metadata as backup
+    email_confirm: false, // Must verify via magic link
+    user_metadata: { role }
   });
 
-  if (createError) throw createError;
-  if (!newUser.user) throw new Error('Failed to create user');
-
-  // Create user_roles entry immediately
-  await createUserRole(newUser.user.id, role);
-
-  // Now send OTP for email verification
-  const { data, error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      data: { role }
-    }
-  });
-
-  if (error) throw error;
+  if (createError) {
+    console.error('Create user error:', createError);
+    throw new Error('Failed to create user account');
+  }
   
-  return data;
+  if (!newUser.user) {
+    throw new Error('Failed to create user account');
+  }
+
+  try {
+    // Step 3: Create user_roles entry (synced with auth.users)
+    await createUserRole(newUser.user.id, role);
+
+    // Step 4: Send magic link via signInWithOtp
+    const { error: otpError } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: false, // User already created
+        emailRedirectTo: `${process.env.FRONTEND_URL}/auth/callback`
+      }
+    });
+
+    if (otpError) {
+      console.error('Send magic link error:', otpError);
+      throw new Error('Failed to send verification email');
+    }
+
+    return { success: true };
+
+  } catch (error) {
+    // Cleanup: Delete auth user if role creation or email fails
+    console.error('Registration error, cleaning up:', error);
+    try {
+      await supabase.auth.admin.deleteUser(newUser.user.id);
+    } catch (cleanupError) {
+      console.error('Cleanup error:', cleanupError);
+    }
+    throw error;
+  }
 };
 
 // Send OTP for login (existing users only)
 export const sendLoginOtp = async (email: string) => {
   const supabase = getClient();
   
-  const { data, error } = await supabase.auth.signInWithOtp({
-    email
+  // Check if user exists
+  const existingUser = await userExists(email);
+  
+  if (!existingUser.exists) {
+    throw new Error('USER_NOT_FOUND');
+  }
+
+  // Check if user has role (both tables must be synced)
+  if (!existingUser.hasRole) {
+    // User exists in auth.users but not in user_roles - data corruption
+    console.error('User exists in auth.users but not in user_roles:', email);
+    throw new Error('Account setup incomplete. Please contact support.');
+  }
+
+  // Send OTP
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      shouldCreateUser: false
+    }
   });
 
-  if (error) throw error;
-  return data;
+  if (error) {
+    console.error('Send OTP error:', error);
+    throw new Error('Failed to send verification code');
+  }
+
+  return { success: true };
 };
 
-// Verify OTP and return user with role
+// Verify OTP and return session
 export const verifyOtp = async (email: string, token: string) => {
   const supabase = getClient();
   
@@ -64,7 +130,10 @@ export const verifyOtp = async (email: string, token: string) => {
     type: 'email',
   });
 
-  if (error) throw error;
+  if (error) {
+    console.error('Verify OTP error:', error);
+    throw error;
+  }
   
   if (!data.user) {
     throw new Error('Verification failed');
