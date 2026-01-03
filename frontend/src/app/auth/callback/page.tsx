@@ -3,50 +3,75 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
+import apiClient from '@/lib/api/client'
 
-export default function AuthCallbackPage() {
+export default function CallbackPage() {
   const router = useRouter()
-  const { storeTokensAndRedirect } = useAuth()
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Extract tokens from URL hash
-        const hash = window.location.hash.substring(1)
-        const params = new URLSearchParams(hash)
-        
-        const accessToken = params.get('access_token')
-        const refreshToken = params.get('refresh_token')
+        // Extract tokens from URL hash (Supabase puts them there)
+        const hashParams = new URLSearchParams(window.location.hash.substring(1))
+        const accessToken = hashParams.get('access_token')
+        const refreshToken = hashParams.get('refresh_token')
 
         if (!accessToken) {
-          setError('Invalid authentication link. Please try again.')
+          setError('No authentication token found')
           return
         }
 
-        // Store tokens and load user (redirect happens automatically)
-        await storeTokensAndRedirect(accessToken, refreshToken || undefined)
+        // Store tokens
+        localStorage.setItem('access_token', accessToken)
+        if (refreshToken) {
+          localStorage.setItem('refresh_token', refreshToken)
+        }
+
+        // Load user data to determine where to redirect
+        const response = await apiClient.get('/auth/me')
+        
+        if (response.data.success) {
+          const user = response.data.data
+          
+          // Redirect based on role and profile completion
+          if (user.role === 'buyer') {
+            if (user.account_data) {
+              router.push('/buyer/profile')
+            } else {
+              router.push('/buyer/complete-profile')
+            }
+          } else if (user.role === 'dealer') {
+            if (user.account_data) {
+              router.push('/dealer/profile')
+            } else {
+              router.push('/dealer/complete-profile')
+            }
+          } else {
+            router.push('/')
+          }
+        }
         
       } catch (err: any) {
         console.error('Callback error:', err)
-        setError(err.message || 'Authentication failed. Please try again.')
+        setError(err.message || 'Authentication failed')
       }
     }
 
     handleCallback()
-  }, [storeTokensAndRedirect])
+  }, [router])
 
   if (error) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-8">
-        <div className="border border-red-500 p-6 text-center">
-          <h1 className="text-2xl mb-4 text-red-500">Authentication Error</h1>
+        <div className="border p-6 border-red-500">
+          <h2 className="text-2xl mb-4 text-red-600">Authentication Error</h2>
           <p className="mb-4">{error}</p>
           <button
-            onClick={() => router.push('/auth/register')}
+            onClick={() => router.push('/auth/login')}
             className="border px-4 py-2 hover:bg-gray-100"
           >
-            Try Again
+            Back to Login
           </button>
         </div>
       </div>
@@ -56,8 +81,11 @@ export default function AuthCallbackPage() {
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
       <div className="border p-6 text-center">
-        <h1 className="text-2xl mb-4">Verifying...</h1>
-        <p>Please wait while we authenticate your account.</p>
+        <div className="mb-4">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+        </div>
+        <h2 className="text-2xl mb-2">Verifying...</h2>
+        <p className="text-gray-600">Please wait while we authenticate your account.</p>
       </div>
     </div>
   )

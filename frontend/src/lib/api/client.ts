@@ -5,12 +5,12 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  withCredentials: true,
 })
 
+// Add token to every request
 apiClient.interceptors.request.use(
   (config) => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+    const token = localStorage.getItem('access_token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
@@ -21,10 +21,16 @@ apiClient.interceptors.request.use(
   }
 )
 
+// Handle 401 errors (token expired)
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    console.error('API Error:', error.response?.data || error.message)
+    if (error.response?.status === 401) {
+      // Token expired or invalid - clear auth state
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      window.location.href = '/auth/login'
+    }
     return Promise.reject(error)
   }
 )

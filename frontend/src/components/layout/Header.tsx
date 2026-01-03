@@ -13,14 +13,12 @@ export default function Header() {
     e.preventDefault()
     
     if (isAuthenticated && user) {
-      // Already authenticated - redirect to their profile
       if (user.role === 'buyer') {
         router.push(user.account_data ? '/buyer/profile' : '/buyer/complete-profile')
       } else if (user.role === 'dealer') {
         router.push(user.account_data ? '/dealer/profile' : '/dealer/complete-profile')
       }
     } else {
-      // Not authenticated - go to login
       router.push('/auth/login')
     }
   }
@@ -30,7 +28,6 @@ export default function Header() {
     router.push('/')
   }
 
-  // Buyer navigation
   const buyerNav = (
     <>
       <Link href="/buyer/profile" className="hover:underline">
@@ -48,7 +45,6 @@ export default function Header() {
     </>
   )
 
-  // Dealer navigation
   const dealerNav = (
     <>
       <Link href="/dealer/profile" className="hover:underline">
@@ -69,16 +65,15 @@ export default function Header() {
     </>
   )
 
-  // Public navigation
   const publicNav = (
     <>
-      <Link href="/about" className="hover:underline">
+      <Link href="/public/about" className="hover:underline">
         About
       </Link>
-      <Link href="/how-it-works" className="hover:underline">
+      <Link href="/public/how-it-works" className="hover:underline">
         How It Works
       </Link>
-      <Link href="/pricing" className="hover:underline">
+      <Link href="/public/pricing" className="hover:underline">
         Pricing
       </Link>
       <a href="#" onClick={handleLoginClick} className="hover:underline">
@@ -87,18 +82,15 @@ export default function Header() {
     </>
   )
 
-  // Determine which navigation to show
   const getNavigation = () => {
     if (!isAuthenticated || !user) {
       return publicNav
     }
 
-    // If on public pages (/, /about, etc), show public nav
-    if (pathname === '/' || pathname.startsWith('/about') || pathname.startsWith('/how-it-works') || pathname.startsWith('/pricing')) {
+    if (pathname === '/' || pathname?.startsWith('/public/')) {
       return publicNav
     }
 
-    // If on buyer/dealer pages, show role-specific nav
     if (user.role === 'buyer') {
       return buyerNav
     } else if (user.role === 'dealer') {

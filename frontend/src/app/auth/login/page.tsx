@@ -10,9 +10,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
 
   useEffect(() => {
-    // Pre-fill email if redirected from register
     const pendingEmail = localStorage.getItem('pending_email')
     if (pendingEmail) {
       setEmail(pendingEmail)
@@ -27,15 +27,12 @@ export default function LoginPage() {
 
     try {
       await login(email)
-      // Store email for OTP page
-      localStorage.setItem('pending_email', email)
-      router.push('/auth/verify-otp')
+      setSuccess(true)
     } catch (err: any) {
       console.error('Login error:', err)
       
       const response = err.response?.data
       
-      // Check for USER_NOT_FOUND error code
       if (response?.error === 'USER_NOT_FOUND' || response?.redirect === '/auth/register') {
         setError('Account not found. Redirecting to registration...')
         setTimeout(() => {
@@ -47,6 +44,23 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  if (success) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <div className="border p-6 max-w-md bg-green-50">
+          <h2 className="text-2xl mb-4">✓ Check Your Email</h2>
+          <p className="mb-4">
+            We sent a login link to <strong>{email}</strong>
+          </p>
+          <p className="text-sm text-gray-600">
+            Click the link in the email to sign in.
+            The link will expire in 1 hour.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -75,7 +89,7 @@ export default function LoginPage() {
             placeholder="your@email.com"
           />
           <p className="text-xs text-gray-500 mt-1">
-            We'll send you a verification code
+            We'll send you a magic link to sign in
           </p>
         </div>
 
@@ -84,7 +98,7 @@ export default function LoginPage() {
           disabled={isLoading || !email}
           className="w-full border p-2 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isLoading ? 'Sending...' : 'Send Verification Code'}
+          {isLoading ? 'Sending...' : 'Send Login Link'}
         </button>
 
         <div className="mt-4 text-sm text-center text-gray-600">

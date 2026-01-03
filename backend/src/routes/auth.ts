@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { registerUser, sendLoginOtp, verifyOtp } from '../services/auth.js';
+import { registerUser, sendLoginLink } from '../services/auth.js';
 import { getUserRole } from '../services/database/user-roles.js';
 import { authLoginSchema, roleSelectionSchema } from '@ca2achain/shared';
 import { createRouteSchema, sendSuccess, sendError, sendValidationError, authRequired } from '../utils/api-responses.js';
@@ -9,7 +9,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
   fastify.post('/register', createRouteSchema({
     tags: ['auth'],
     summary: 'Register new user',
-    description: 'Checks if user exists, creates auth.users + user_roles if not, sends magic link',
+    description: 'Creates auth.users + user_roles, sends magic link',
     body: {
       type: 'object',
       properties: {
@@ -35,7 +35,6 @@ export default async function authRoutes(fastify: FastifyInstance) {
     } catch (error: any) {
       console.error('Register error:', error);
       
-      // User already exists - send them to login with OTP
       if (error.message === 'EXISTING_USER') {
         return reply.status(409).send({
           success: false,
@@ -53,11 +52,11 @@ export default async function authRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // Login existing user
+  // Login existing user (CHANGED: sends magic link instead of OTP)
   fastify.post('/login', createRouteSchema({
     tags: ['auth'],
     summary: 'Login existing user',
-    description: 'Sends OTP to existing user',
+    description: 'Sends magic link to existing user (click to login)',
     body: {
       type: 'object',
       properties: {
@@ -69,11 +68,11 @@ export default async function authRoutes(fastify: FastifyInstance) {
     try {
       const { email } = authLoginSchema.parse(request.body);
 
-      await sendLoginOtp(email);
+      await sendLoginLink(email);
 
       return sendSuccess(reply, {
         email,
-        message: `Verification code sent to ${email}`
+        message: `Verification link sent to ${email}. Click the link to login.`
       }, 200);
 
     } catch (error: any) {
@@ -92,57 +91,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
         return sendValidationError(reply, 'Invalid email format');
       }
       
-      return sendError(reply, error.message || 'Failed to send verification code', 500);
-    }
-  });
-
-  // Verify OTP
-  fastify.post('/verify-otp', createRouteSchema({
-    tags: ['auth'],
-    summary: 'Verify OTP code',
-    description: 'Verifies 6-digit OTP and returns JWT with role',
-    body: {
-      type: 'object',
-      properties: {
-        email: { type: 'string', format: 'email' },
-        token: { type: 'string', pattern: '^[0-9]{6}$' }
-      },
-      required: ['email', 'token']
-    }
-  }), async (request, reply) => {
-    try {
-      const { email, token } = request.body as { email: string, token: string };
-
-      const result = await verifyOtp(email, token);
-      
-      if (!result.user) {
-        return sendError(reply, 'Verification failed', 400);
-      }
-
-      const userRole = await getUserRole(result.user.id);
-
-      if (!userRole) {
-        return sendError(reply, 'Account setup incomplete. Please contact support.', 400);
-      }
-
-      return sendSuccess(reply, {
-        access_token: result.session?.access_token,
-        refresh_token: result.session?.refresh_token,
-        role: userRole,
-        user: {
-          id: result.user.id,
-          email: result.user.email
-        }
-      }, 200);
-
-    } catch (error: any) {
-      console.error('Verify OTP error:', error);
-      
-      if (error.message?.includes('expired') || error.message?.includes('invalid')) {
-        return sendError(reply, 'Invalid or expired code. Please request a new one.', 400);
-      }
-      
-      return sendError(reply, 'Verification failed', 500);
+      return sendError(reply, error.message || 'Failed to send verification link', 500);
     }
   });
 
