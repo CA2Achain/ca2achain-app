@@ -139,10 +139,18 @@ export const encryptPersonaData = async (driverLicenseData: DriverLicenseData, p
       date_of_birth: driverLicenseData.date_of_birth,
       full_name: driverLicenseData.full_name,
       address: driverLicenseData.address,
+      issuing_state: driverLicenseData.issuing_state,
       issued_date: driverLicenseData.issued_date,
       expires_date: driverLicenseData.expires_date,
     },
-    persona_session_id: personaSessionId,
+    persona_verification_results: {
+      verification_status: 'passed',
+      confidence_scores: {
+        face_match: undefined,
+        document_authenticity: undefined,
+      },
+      persona_session_id: personaSessionId,
+    },
   };
   
   return await encrypt(JSON.stringify(personaData), vaultKeyId);

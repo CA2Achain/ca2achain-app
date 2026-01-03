@@ -132,10 +132,18 @@ export const getVerificationData = async (inquiryId: string): Promise<EncryptedP
           zip_code: extractedData['address-postal-code'] || '',
           country: 'US'
         },
+        issuing_state: extractedData['address-subdivision'] || '',
         issued_date: extractedData['identification-issue-date'] || '',
         expires_date: extractedData['identification-expiration-date'] || ''
       },
-      persona_session_id: inquiryId
+      persona_verification_results: {
+        verification_status: inquiry.attributes?.['decision-status'] === 'approved' ? 'passed' : 'failed',
+        confidence_scores: {
+          face_match: documentVerification.attributes?.['confidence-score'],
+          document_authenticity: documentVerification.attributes?.['document-confidence-score']
+        },
+        persona_session_id: inquiryId
+      }
     };
 
     console.log(`✅ Verification data extracted for inquiry ${inquiryId}`);

@@ -15,6 +15,7 @@ import dealerRoutes from './routes/dealer.js';
 import verificationRoutes from './routes/verification.js';
 import webhookRoutes from './routes/webhooks.js';
 import paymentsRoutes from './routes/payments.js';
+import personaRoutes from './routes/persona.js';
 import healthRoutes from './routes/health.js';
 
 // Load environment variables
@@ -58,6 +59,12 @@ await fastify.register(authRoutes, { prefix: '/auth' });
 await fastify.register(buyerRoutes, { 
   prefix: '/buyer',
   preHandler: authMiddleware 
+});
+
+// Persona routes (protected by auth middleware)
+await fastify.register(personaRoutes, { 
+  prefix: '/persona',
+  preHandler: authMiddleware
 });
 
 // Dealer routes (protected by auth or API key middleware) 
