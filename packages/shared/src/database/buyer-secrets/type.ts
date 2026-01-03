@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   driverLicenseDataSchema,
+  personaResultsDataSchema,
   encryptedPersonaDataSchema,
   privadoCredentialSchema,
   zkpProofsDataSchema,
@@ -15,6 +16,7 @@ import {
 
 // Main types from schemas
 export type DriverLicenseData = z.infer<typeof driverLicenseDataSchema>;
+export type personaResultsData = z.infer<typeof personaResultsDataSchema>;
 export type EncryptedPersonaData = z.infer<typeof encryptedPersonaDataSchema>;
 export type PrivadoCredential = z.infer<typeof privadoCredentialSchema>;
 export type ZkpProofsData = z.infer<typeof zkpProofsDataSchema>;

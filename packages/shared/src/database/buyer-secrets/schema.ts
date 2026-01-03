@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { addressSchema, dateOfBirthSchema } from '../common/schema.js';
+import { addressSchema, dateOfBirthSchema } from '../../common/schema.js';
 import { privadoAgeProofSchema, privadoAddressProofSchema } from '../verification/schema.js';
 
 // =============================================
@@ -15,14 +15,25 @@ export const driverLicenseDataSchema = z.object({
     last_name: z.string(),
   }),
   address: addressSchema, // Use common address structure
+  issuing_state: z.string(),
   issued_date: z.string().date(),
   expires_date: z.string().date(),
 });
 
+// Persona confidence score
+export const personaResultsDataSchema = z.object({
+  verification_status: z.enum(['passed', 'failed', 'needs_review']),
+  confidence_scores: z.object({
+    face_match: z.number().optional(),
+    document_authenticity: z.number().optional(),
+  }),
+  persona_session_id: z.string().optional(),
+})
+
 // Complete encrypted persona data structure
 export const encryptedPersonaDataSchema = z.object({
   driver_license: driverLicenseDataSchema,
-  persona_session_id: z.string(),
+  persona_verification_results: personaResultsDataSchema,
 });
 
 // =============================================

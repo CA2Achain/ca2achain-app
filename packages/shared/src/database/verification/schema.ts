@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { addressStringSchema } from '../common/schema.js';
+import { addressStringSchema } from '../../common/schema.js';
 
 // =============================================
 // DEALER API SCHEMAS

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuth } from '@/context/AuthContext'
 import apiClient from '@/lib/api/client'
 
 export default function CallbackPage() {
@@ -34,27 +33,36 @@ export default function CallbackPage() {
         if (response.data.success) {
           const user = response.data.data
           
-          // Redirect based on role and profile completion
+          // Redirect based on role and profile completion status
           if (user.role === 'buyer') {
+            // Check if buyer has completed their profile
             if (user.account_data) {
+              // Profile complete - go to profile page
               router.push('/buyer/profile')
             } else {
+              // Profile NOT complete - go to complete-profile page
               router.push('/buyer/complete-profile')
             }
           } else if (user.role === 'dealer') {
+            // Check if dealer has completed their profile
             if (user.account_data) {
+              // Profile complete - go to profile page
               router.push('/dealer/profile')
             } else {
+              // Profile NOT complete - go to complete-profile page
               router.push('/dealer/complete-profile')
             }
           } else {
+            // No role or unknown role - go to homepage
             router.push('/')
           }
+        } else {
+          setError('Failed to load user data')
         }
         
       } catch (err: any) {
         console.error('Callback error:', err)
-        setError(err.message || 'Authentication failed')
+        setError(err.response?.data?.error || err.message || 'Authentication failed')
       }
     }
 

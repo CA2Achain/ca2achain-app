@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { addressSchema, phoneNumberSchema, paymentInfoSchema } from '../common/schema.js';
+import { addressSchema, phoneNumberSchema, paymentInfoSchema } from '../../common/schema.js';
 
 // =============================================
 // DEALER REGISTRATION & ACCOUNT SCHEMAS

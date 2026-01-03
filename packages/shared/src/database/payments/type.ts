@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PaymentStatus } from '../common/type.js';
+import { PaymentStatus } from '../../common/type.js';
 import {
   paymentSchema,
   createPaymentSchema,

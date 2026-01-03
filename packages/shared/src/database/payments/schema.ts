@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { paymentStatusSchema, paymentProviderInfoSchema } from '../common/schema.js';
+import { paymentStatusSchema, paymentProviderInfoSchema } from '../../common/schema.js';
 
 // =============================================
 // PAYMENT SCHEMAS

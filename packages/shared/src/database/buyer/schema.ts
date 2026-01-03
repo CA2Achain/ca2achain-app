@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { emailSchema, phoneNumberSchema, paymentStatusSchema } from '../common/schema.js';
+import { emailSchema, phoneNumberSchema, paymentStatusSchema } from '../../common/schema.js';
 
 // =============================================
 // BUYER ACCOUNT MANAGEMENT
