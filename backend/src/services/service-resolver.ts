@@ -1,7 +1,6 @@
 /**
  * Service Resolver - Automatically chooses real or mock services
- * 
- * Exports all payment and verification services needed for safe capture flow
+ * Simplified version to avoid TypeScript dynamic import issues
  */
 
 // Check which services have API keys available
@@ -20,83 +19,36 @@ if (!hasStripeKey || !hasPersonaKey) {
   console.log('💡 Add API keys to .env to use real services');
 }
 
-// =============================================
-// STRIPE PAYMENT FUNCTIONS (Safe Capture Flow)
-// =============================================
-
-// For now, always use mock services
-// TODO: Add conditional imports for real services when API keys present
+// For now, always use mock services to fix TypeScript issues
+// TODO: Add proper conditional imports when needed
 export * from './mocks/stripe.js';
 
-// Re-export specific functions needed for payment flow
-export {
-  createBuyerCheckoutSession,
-  verifyBuyerPayment,
-  captureBuyerPayment,    // NEW: Capture after ID passes
-  refundBuyerPayment,     // NEW: Refund if ID fails
-  createDealerSubscriptionCheckout,
-  verifyDealerSubscription,
-  verifyWebhookSignature,
-  getDealerSubscriptionDetails,
-  cancelDealerSubscription,
-  updateDealerSubscriptionPlan,
-  resumeDealerSubscription,
-  updateDealerBillingInfo,
-  getCustomerDetails,
-  getSubscriptionDetails,
-  initStripe
-} from './mocks/stripe.js';
-
-// =============================================
-// PERSONA VERIFICATION FUNCTIONS
-// =============================================
-
+// Import mock persona functions - only what's actually used in 2+1 flow
 import {
   createBuyerInquiry,
-  getVerificationData,
+  getInquiryStatus,
   getVerifiedPersonaData,
   verifyPersonaWebhook,
-  getInquiryStatus,
-  getInquiryByBuyerId,
-  isBuyerVerified,
-  simulatePersonaWebhook
+  simulatePersonaWebhookPassed,
+  simulatePersonaWebhookFailed
 } from './mocks/persona.js';
 
 // Export Persona functions as a service object
 export const PersonaService = {
   createBuyerInquiry,
-  getVerificationData,
+  getInquiryStatus,
   getVerifiedPersonaData,
   verifyPersonaWebhook,
-  getInquiryStatus,
-  getInquiryByBuyerId,
-  isBuyerVerified,
-  simulatePersonaWebhook
 };
 
-// Also export individual functions for direct use
-export {
-  createBuyerInquiry,
-  getVerificationData,
-  getVerifiedPersonaData,
-  verifyPersonaWebhook,
-  getInquiryStatus,
-  getInquiryByBuyerId,
-  isBuyerVerified,
-  simulatePersonaWebhook
-};
-
-// Export mock services for testing
+// Also export individual mock services for testing
 export * as MockStripe from './mocks/stripe.js';
 export * as MockPersona from './mocks/persona.js';
 
-// =============================================
-// SERVICE STATUS & LOGGING
-// =============================================
+// Export test helpers separately
+export { simulatePersonaWebhookPassed, simulatePersonaWebhookFailed };
 
-/**
- * Get current service status (real vs mock)
- */
+// Service status for debugging
 export const getServiceStatus = () => {
   return {
     stripe: hasStripeKey ? 'REAL' : 'MOCK',
@@ -107,9 +59,7 @@ export const getServiceStatus = () => {
   };
 };
 
-/**
- * Log service status to console
- */
+// Log service status
 export const logServiceStatus = () => {
   const status = getServiceStatus();
   console.log('\n🔧 Service Status:');
@@ -118,5 +68,5 @@ export const logServiceStatus = () => {
     const emoji = state === 'REAL' ? '✅' : state === 'MOCK' ? '🧪' : '❌';
     console.log(`   ${emoji} ${service}: ${state}`);
   });
-  console.log('\n💡 Safe Capture Flow: authorize → ID check → capture only if ID passes\n');
-};
+  console.log('');
+}

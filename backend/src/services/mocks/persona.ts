@@ -1,6 +1,7 @@
 /**
- * Mock Persona Service - COMPLETE WITH CORRECT STRUCTURE
+ * Mock Persona Service - Clean Implementation
  * 
+ * Only exports functions actually used in 2+1 buyer verification flow
  * Inquiry object structure: { id, attributes: { 'session-token' } }
  */
 
@@ -15,7 +16,8 @@ const mockVerifiedData = new Map();
 console.log('🧪 Using MOCK Persona service for development');
 
 // =============================================
-// CREATE INQUIRY
+// CORE FUNCTION: CREATE BUYER INQUIRY
+// Used in: POST /buyer/start-verification
 // =============================================
 
 /**
@@ -54,7 +56,8 @@ export const createBuyerInquiry = async (buyerId: string) => {
 };
 
 // =============================================
-// GET INQUIRY STATUS
+// HELPER FUNCTION: GET INQUIRY STATUS
+// Used in: Webhook processing to determine pass/fail
 // =============================================
 
 /**
@@ -75,34 +78,44 @@ export const getInquiryStatus = async (inquiryId: string) => {
 };
 
 // =============================================
-// GET INQUIRY DATA
+// HELPER FUNCTION: GET VERIFIED DATA
+// Used in: Webhook processing after ID passes (for CCPA storage)
 // =============================================
 
-export const getInquiry = async (inquiryId: string) => {
-  await mockDelay();
-  const inquiry = mockInquiries.get(inquiryId);
-  if (!inquiry) throw new Error(`Inquiry not found: ${inquiryId}`);
-  return inquiry;
-};
-
-export const getInquiryByBuyerId = async (buyerId: string) => {
+/**
+ * Get verified buyer data after ID check passed
+ * Returns verified persona data or null if not verified
+ * Used to retrieve verified name, DOB, address after successful ID verification
+ */
+export const getVerifiedPersonaData = async (inquiryId: string) => {
   await mockDelay();
   
-  // Find inquiry by reference-id
-  let foundInquiry = null;
-  for (const [id, inquiry] of mockInquiries.entries()) {
-    if (inquiry.attributes['reference-id'] === buyerId) {
-      foundInquiry = inquiry;
-      break;
-    }
+  const verifiedData = mockVerifiedData.get(inquiryId);
+  if (!verifiedData) {
+    console.warn(`⚠️  Mock Persona: No verified data for ${inquiryId}`);
+    return null;
   }
   
-  if (!foundInquiry) throw new Error(`No inquiry found for buyer: ${buyerId}`);
-  return foundInquiry;
+  console.log(`✅ Mock Persona: Retrieved verified data for ${inquiryId}`);
+  return verifiedData;
 };
 
 // =============================================
-// SIMULATE WEBHOOK RESULTS (FOR TESTING)
+// WEBHOOK SIGNATURE VERIFICATION
+// Used in: Webhook endpoint to verify authenticity
+// =============================================
+
+/**
+ * Verify Persona webhook signature
+ * In development/test, always returns true
+ */
+export const verifyPersonaWebhook = (payload: string, signature: string, secret: string) => {
+  console.log(`✅ Mock Persona: Webhook signature verified`);
+  return true;
+};
+
+// =============================================
+// TESTING HELPERS (not used in production flow)
 // =============================================
 
 /**
@@ -121,7 +134,7 @@ export const simulatePersonaWebhookPassed = async (inquiryId: string) => {
   
   mockInquiryStatuses.set(inquiryId, inquiryData);
   
-  // Store verified data
+  // Store verified data for test access
   mockVerifiedData.set(inquiryId, {
     name: 'John Doe',
     date_of_birth: '1990-01-01',
@@ -151,75 +164,6 @@ export const simulatePersonaWebhookFailed = async (inquiryId: string) => {
   
   console.log(`✅ Mock Persona: Simulated FAILED verification for ${inquiryId}`);
   return inquiryData;
-};
-
-// =============================================
-// GET VERIFIED DATA
-// =============================================
-
-/**
- * Get verified buyer data (after ID passed)
- */
-export const getVerifiedPersonaData = async (inquiryId: string) => {
-  await mockDelay();
-  
-  const verifiedData = mockVerifiedData.get(inquiryId);
-  if (!verifiedData) {
-    console.warn(`⚠️  Mock Persona: No verified data for ${inquiryId}`);
-    return null;
-  }
-  
-  console.log(`✅ Mock Persona: Retrieved verified data for ${inquiryId}`);
-  return verifiedData;
-};
-
-// =============================================
-// WEBHOOK PROCESSING HELPER
-// =============================================
-
-/**
- * Process Persona webhook (for webhook route)
- * Called from backend/src/routes/persona.ts
- */
-export const processPersonaWebhook = async (payload: any) => {
-  const inquiryId = payload.data?.inquiry_id;
-  const status = payload.data?.status;
-  
-  if (!inquiryId || !status) {
-    throw new Error('Invalid webhook payload');
-  }
-  
-  const inquiryData = mockInquiryStatuses.get(inquiryId);
-  if (!inquiryData) {
-    throw new Error(`Inquiry not found: ${inquiryId}`);
-  }
-  
-  inquiryData.status = 'completed';
-  inquiryData.decision = status === 'passed' ? 'approved' : 'declined';
-  inquiryData.webhook_processed_at = new Date().toISOString();
-  
-  mockInquiryStatuses.set(inquiryId, inquiryData);
-  
-  console.log(`✅ Mock Persona: Processed webhook - ${inquiryId} ${inquiryData.decision}`);
-  
-  return {
-    inquiryId,
-    decision: inquiryData.decision,
-    status: 'processed'
-  };
-};
-
-// =============================================
-// VERIFY WEBHOOK SIGNATURE
-// =============================================
-
-/**
- * Verify Persona webhook signature
- * In development/test, always returns true
- */
-export const verifyPersonaWebhook = (payload: string, signature: string, secret: string) => {
-  console.log(`✅ Mock Persona: Webhook signature verified`);
-  return true;
 };
 
 // =============================================
