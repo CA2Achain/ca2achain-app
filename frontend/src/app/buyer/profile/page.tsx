@@ -57,9 +57,6 @@ export default function BuyerProfilePage() {
             </div>
           )}
           <div>
-            <span className="font-bold">Buyer Reference ID:</span> {profile.buyer_reference_id}
-          </div>
-          <div>
             <span className="font-bold">Verification Status:</span> {profile.verification_status}
           </div>
         </div>

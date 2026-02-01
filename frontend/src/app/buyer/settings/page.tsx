@@ -37,7 +37,6 @@ export default function BuyerSettingsPage() {
         <div className="space-y-2">
           <p><strong>Email:</strong> {user.email}</p>
           <p><strong>Role:</strong> Buyer</p>
-          <p><strong>Account Status:</strong> Active</p>
         </div>
       </div>
 

@@ -78,7 +78,7 @@ export default function BuyerVerifyIdentityPage() {
         <h2 className="text-xl font-semibold mb-4">Start New CA DMV Identification Verification</h2>
         <p className="text-gray-600 mb-6">
           Complete identity verification to enable age and address verification for dealers.
-          Verification requires a valid driver's license and is valid for 1 year.
+          Verification requires a valid driver's license and is valid until the ID expiration date.
         </p>
         
         <Link href="/buyer/verify-identity/start">
