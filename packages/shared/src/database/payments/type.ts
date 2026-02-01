@@ -37,9 +37,22 @@ export interface PaymentCreationData {
 }
 
 // Payment update data (for webhooks)
+// NEW: Added stripe_info with error_message support
 export interface PaymentUpdateData {
   status?: PaymentStatus;
-  payment_provider_info?: Record<string, any>;
+  payment_provider_info?: {
+    stripe_info?: {
+      stripe_customer_id?: string;
+      stripe_payment_method_id?: string;
+      stripe_payment_intent_id?: string;
+      authorized_at?: string;
+      captured_at?: string;
+      refunded_at?: string;
+      refund_reason?: string;
+      error_message?: string;  // NEW: For ID verification failures, payment errors
+    };
+    credit_card_info?: any;
+  };
 }
 
 // Webhook event types
@@ -68,4 +81,13 @@ export interface RefundResponse {
   refund_id?: string;
   amount_refunded?: number;
   error?: string;
+}
+
+// NEW: Payment error details (for display to user or logging)
+export interface PaymentErrorInfo {
+  payment_id: string;
+  error_type: 'id_verification_failed' | 'payment_method_declined' | 'stripe_error' | 'unknown';
+  error_message: string;
+  stripe_payment_intent_id?: string;
+  timestamp: string;
 }

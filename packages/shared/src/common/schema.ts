@@ -52,8 +52,20 @@ export const addressStringSchema = z.string().min(10, 'Complete address required
 // PAYMENT DATA STRUCTURES
 // =============================================
 
-// Payment status enum (used across payment and compliance systems)
-export const paymentStatusSchema = z.enum(['pending', 'succeeded', 'failed', 'refunded']);
+// Payment status enum - UPDATED for 2+1 safe capture flow
+export const paymentStatusSchema = z.enum([
+  'pending',                    // Not yet processed
+  'authorized',                 // NEW: Payment authorized, funds held (manual capture mode)
+  'id_check_started',           // NEW: ID verification started
+  'id_check_passed',            // NEW: ID verification passed
+  'succeeded',                  // Old status (for backward compat) - means completed
+  'completed',                  // NEW: Payment captured, fully verified
+  'failed',                     // Payment failed
+  'authorized_refunded',        // NEW: Authorized hold released (no charge)
+  'completed_refunded',         // Captured payment refunded
+  'refunded',                   // Old status (for backward compat)
+  'error'                       // Error state
+]);
 
 // Credit card info (display purposes only - no sensitive data)
 export const creditCardInfoSchema = z.object({
@@ -64,9 +76,16 @@ export const creditCardInfoSchema = z.object({
 });
 
 // Stripe integration info (secure tokens only)
+// NEW: Added error_message for payment error tracking
 export const stripeInfoSchema = z.object({
   stripe_customer_id: z.string().optional(), // Per-customer Stripe entity
   stripe_payment_method_id: z.string().optional(), // Secure payment method token
+  stripe_payment_intent_id: z.string().optional(), // For manual capture flow
+  authorized_at: z.string().optional(), // When payment was authorized
+  captured_at: z.string().optional(), // When payment was captured
+  refunded_at: z.string().optional(), // When hold was released
+  refund_reason: z.string().optional(), // Why hold was released
+  error_message: z.string().optional(), // NEW: Payment error or ID verification failure message
 });
 
 // Complete payment info structure (for dealer accounts)

@@ -1,50 +1,146 @@
 import { z } from 'zod';
-import { emailSchema, paymentStatusSchema } from '../../common/schema.js';
+import { paymentStatusSchema } from '../../common/schema.js';
 
 // =============================================
-// BUYER VERIFICATION PAYMENT
+// BUYER PAYMENT - SAFE CAPTURE FLOW
 // =============================================
 
-// Buyer verification checkout session request
+/**
+ * Buyer checkout session request
+ * Frontend: POST /api/payments/buyer/checkout
+ */
 export const buyerCheckoutSessionSchema = z.object({
   buyer_id: z.string().uuid(),
-  buyer_email: emailSchema,
 });
 
-// Stripe checkout session response
+export type BuyerCheckoutSession = z.infer<typeof buyerCheckoutSessionSchema>;
+
+/**
+ * Stripe checkout session response
+ * Contains session URL for payment form and payment intent ID
+ */
 export const stripeCheckoutSessionSchema = z.object({
-  id: z.string(), // Stripe session ID (cs_xxx)
-  url: z.string().url(), // Checkout URL to redirect buyer
-  payment_intent: z.string().optional(), // Stripe payment intent ID
-  client_secret: z.string().optional(), // For client-side payment confirmation
+  id: z.string(), // cs_xxx
+  url: z.string().url(),
+  payment_intent: z.string(), // pi_xxx
+  metadata: z.record(z.string()).optional(),
   mode: z.enum(['payment', 'subscription']),
   status: z.enum(['open', 'complete', 'expired']),
 });
 
-// Buyer payment verification result
+export type StripeCheckoutSession = z.infer<typeof stripeCheckoutSessionSchema>;
+
+/**
+ * Payment authorization result
+ * After Stripe authorizes funds (before ID check)
+ */
 export const buyerPaymentVerificationSchema = z.object({
-  buyer_id: z.string().uuid(),
-  payment_intent_id: z.string(),
-  amount_cents: z.number().int(),
-  currency: z.string().default('usd'),
-  status: paymentStatusSchema,
-  verified_at: z.string().datetime().optional(),
+  buyerId: z.string().uuid(),
+  paymentIntentId: z.string(),
+  amountAuthorized: z.number().int(),
+  status: z.literal('authorized'),
+  captureMethod: z.literal('manual'),
 });
 
-// Buyer payment response (safe to send to frontend)
+export type BuyerPaymentVerification = z.infer<typeof buyerPaymentVerificationSchema>;
+
+/**
+ * Payment response to frontend (safe to send)
+ */
 export const buyerPaymentResponseSchema = z.object({
+  payment_id: z.string().uuid(),
+  payment_status: z.enum(['authorized']),
+  message: z.string(),
+});
+
+export type BuyerPaymentResponse = z.infer<typeof buyerPaymentResponseSchema>;
+
+// =============================================
+// PAYMENT CAPTURE & REFUND
+// =============================================
+
+/**
+ * Capture payment result
+ * Called after ID verification passes
+ * Charges the card
+ */
+export const capturePaymentResultSchema = z.object({
+  paymentIntentId: z.string(),
+  amount: z.number().int(),
+  amountCaptured: z.number().int(),
+  status: z.literal('captured'),
+  capturedAt: z.string().datetime(),
+});
+
+export type CapturePaymentResult = z.infer<typeof capturePaymentResultSchema>;
+
+/**
+ * Refund hold result
+ * Called if ID verification fails
+ * Releases authorized hold (no charge made)
+ */
+export const refundHoldResultSchema = z.object({
+  paymentIntentId: z.string(),
+  status: z.literal('canceled'),
+  canceledAt: z.string().datetime(),
+  message: z.string(),
+});
+
+export type RefundHoldResult = z.infer<typeof refundHoldResultSchema>;
+
+// =============================================
+// DEALER SUBSCRIPTION
+// =============================================
+
+/**
+ * Dealer subscription checkout request
+ * Frontend: POST /api/payments/dealer/subscription
+ */
+export const dealerSubscriptionCheckoutSchema = z.object({
+  dealer_id: z.string().uuid(),
+  subscription_tier: z.enum(['tier1', 'tier2', 'tier3']),
+});
+
+export type DealerSubscriptionCheckout = z.infer<typeof dealerSubscriptionCheckoutSchema>;
+
+/**
+ * Dealer subscription response
+ * Contains checkout URL
+ */
+export const dealerSubscriptionResponseSchema = z.object({
   checkout_url: z.string().url(),
   session_id: z.string(),
-  amount_cents: z.number().int(),
-  amount_display: z.string(), // "$2.00" for display
+  payment_id: z.string().uuid(),
 });
 
+export type DealerSubscriptionResponse = z.infer<typeof dealerSubscriptionResponseSchema>;
+
+/**
+ * Dealer subscription result
+ * After subscription is verified/activated
+ */
+export const dealerSubscriptionResultSchema = z.object({
+  dealerId: z.string().uuid(),
+  stripeCustomerId: z.string(),
+  subscriptionId: z.string(),
+  subscriptionStatus: z.literal('active'),
+  monthlyQueryLimit: z.number().int(),
+  planTier: z.enum(['tier1', 'tier2', 'tier3']),
+  currentPeriodStart: z.date(),
+  currentPeriodEnd: z.date(),
+});
+
+export type DealerSubscriptionResult = z.infer<typeof dealerSubscriptionResultSchema>;
+
 // =============================================
-// WEBHOOK OBJECTS
+// WEBHOOK
 // =============================================
 
-// Stripe webhook event object (the full object, distinct from event types)
-export const stripeWebhookObjectSchema = z.object({
+/**
+ * Stripe webhook event
+ * Base structure for all Stripe webhooks
+ */
+export const stripeWebhookEventSchema = z.object({
   id: z.string(),
   type: z.string(),
   data: z.object({
@@ -52,3 +148,28 @@ export const stripeWebhookObjectSchema = z.object({
   }),
   created: z.number(),
 });
+
+export type StripeWebhookEvent = z.infer<typeof stripeWebhookEventSchema>;
+
+// =============================================
+// PLAN LIMITS
+// =============================================
+
+/**
+ * Dealer subscription plan limits
+ * Tier mapping to monthly verification queries
+ */
+export const dealerPlanLimitsSchema = z.object({
+  tier1: z.literal(50),    // Starter
+  tier2: z.literal(350),   // Business
+  tier3: z.literal(3000),  // Enterprise
+});
+
+export type DealerPlanLimits = z.infer<typeof dealerPlanLimitsSchema>;
+
+// Export plan limits constant
+export const DEALER_PLAN_LIMITS: DealerPlanLimits = {
+  tier1: 50,
+  tier2: 350,
+  tier3: 3000,
+};

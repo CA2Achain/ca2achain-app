@@ -1,24 +1,36 @@
 /**
- * Mock Stripe Service for Development
- * Use this when you don't have Stripe API keys yet
+ * Stripe Service - Safe Payment Capture Flow Implementation
+ * 
+ * Flow: authorize (manual capture) → ID check → capture only if ID passes
+ * 
+ * Key Principle: Funds are held but not charged until ID verification passes
+ * This prevents payment loss if ID verification fails
  */
 
 import { randomUUID } from 'crypto';
 
-// Mock delay to simulate network requests
 const mockDelay = (ms: number = 100) => new Promise(resolve => setTimeout(resolve, ms));
 
 console.log('🧪 Using MOCK Stripe service for development');
+console.log('💡 Safe Capture Flow: authorize → ID check → capture only if ID passes');
 
-// In-memory storage for mock data
+const mockPaymentIntents = new Map();
 const mockCustomers = new Map();
 const mockSessions = new Map();
 const mockSubscriptions = new Map();
 
 // =============================================
-// BUYER PAYMENT FUNCTIONS (One-time $2 fee)
+// BUYER PAYMENT - SAFE CAPTURE FLOW
 // =============================================
 
+/**
+ * Create buyer checkout session with MANUAL CAPTURE mode
+ * 
+ * capture_method: 'manual' = authorize funds but do NOT auto-charge
+ * Funds are held on card until we explicitly call capture() after ID passes
+ * 
+ * Payment Status: pending → authorized
+ */
 export const createBuyerCheckoutSession = async (
   buyerEmail: string,
   buyerId: string
@@ -28,13 +40,27 @@ export const createBuyerCheckoutSession = async (
   const sessionId = `cs_mock_${randomUUID().slice(0, 8)}`;
   const paymentIntentId = `pi_mock_${randomUUID().slice(0, 8)}`;
   
+  // Store payment intent for later capture or refund
+  mockPaymentIntents.set(paymentIntentId, {
+    id: paymentIntentId,
+    status: 'requires_payment_method', // Awaiting payment method
+    amount: 200, // $2.00 in cents
+    currency: 'usd',
+    capture_method: 'manual', // CRITICAL: Will NOT auto-charge
+    created: new Date().toISOString(),
+    buyer_id: buyerId,
+    amount_captured: null,
+    captured_at: null
+  });
+  
   const session = {
     id: sessionId,
     url: `https://checkout.stripe.com/pay/mock_${sessionId}`,
     payment_intent: paymentIntentId,
     metadata: {
       buyer_id: buyerId,
-      payment_type: 'verification'
+      payment_type: 'verification',
+      capture_method: 'manual'
     },
     mode: 'payment',
     status: 'open'
@@ -42,10 +68,20 @@ export const createBuyerCheckoutSession = async (
   
   mockSessions.set(sessionId, session);
   
-  console.log(`🧪 Mock Stripe: Created buyer checkout session for ${buyerEmail}`);
+  console.log(`🧪 Mock Stripe: Created buyer checkout with manual capture for ${buyerEmail}`);
+  console.log(`   Payment Intent: ${paymentIntentId} (capture_method: manual)`);
+  console.log(`   Amount: $${200 / 100} held (not yet charged)`);
   return session;
 };
 
+/**
+ * Verify buyer payment (payment method added)
+ * 
+ * After this: payment intent status = 'succeeded' (authorized, ready to capture)
+ * Funds are held on card but NOT charged yet
+ * 
+ * Payment Status: authorized
+ */
 export const verifyBuyerPayment = async (sessionId: string) => {
   await mockDelay();
   
@@ -54,17 +90,110 @@ export const verifyBuyerPayment = async (sessionId: string) => {
     throw new Error('Mock payment session not found');
   }
   
-  // Mark as completed
+  const paymentIntent = mockPaymentIntents.get(session.payment_intent);
+  if (!paymentIntent) {
+    throw new Error('Mock payment intent not found');
+  }
+  
+  // Mark payment method as confirmed, funds authorized
+  paymentIntent.status = 'succeeded'; // Authorized (held), ready to capture
+  paymentIntent.client_secret = `secret_${randomUUID()}`;
+  mockPaymentIntents.set(session.payment_intent, paymentIntent);
+  
   session.status = 'complete';
   mockSessions.set(sessionId, session);
   
   const result = {
     buyerId: session.metadata.buyer_id,
     paymentIntentId: session.payment_intent,
-    amountPaid: 3900, // $39.00 in cents
+    amountAuthorized: 200, // $2.00 - funds HELD
+    captureMethod: 'manual',
+    nextStep: 'Start ID verification. Funds will be captured only if ID passes.'
   };
   
-  console.log(`🧪 Mock Stripe: Verified buyer payment for buyer ${result.buyerId}`);
+  console.log(`🧪 Mock Stripe: Payment authorized for buyer ${result.buyerId}`);
+  console.log(`   Amount held: $${result.amountAuthorized / 100} (not yet charged)`);
+  return result;
+};
+
+/**
+ * CAPTURE buyer payment (charge the card)
+ * 
+ * ONLY called after ID verification passes
+ * Moves payment from 'authorized' to 'captured'
+ * This is when the card is actually charged
+ * 
+ * Payment Status: id_check_passed → completed
+ */
+export const captureBuyerPayment = async (paymentIntentId: string) => {
+  await mockDelay();
+  
+  const paymentIntent = mockPaymentIntents.get(paymentIntentId);
+  if (!paymentIntent) {
+    throw new Error('Payment intent not found');
+  }
+
+  if (paymentIntent.status !== 'succeeded') {
+    throw new Error(`Cannot capture payment in status: ${paymentIntent.status}`);
+  }
+
+  // Capture the authorized funds (charge the card)
+  paymentIntent.status = 'captured';
+  paymentIntent.amount_captured = paymentIntent.amount;
+  paymentIntent.captured_at = new Date().toISOString();
+  mockPaymentIntents.set(paymentIntentId, paymentIntent);
+
+  const result = {
+    paymentIntentId: paymentIntentId,
+    amount: paymentIntent.amount,
+    amountCaptured: paymentIntent.amount_captured,
+    status: 'captured',
+    capturedAt: paymentIntent.captured_at,
+    message: 'Funds charged'
+  };
+
+  console.log(`🧪 Mock Stripe: CAPTURED payment ${paymentIntentId}`);
+  console.log(`   Amount CHARGED: $${result.amount / 100}`);
+  return result;
+};
+
+/**
+ * REFUND authorized hold (release without charging)
+ * 
+ * Called if ID verification FAILS before capture
+ * No actual refund needed - funds were never charged, just held
+ * Stripe simply cancels the authorization
+ * 
+ * Payment Status: id_check_started → authorized_refunded
+ */
+export const refundBuyerPayment = async (paymentIntentId: string) => {
+  await mockDelay();
+  
+  const paymentIntent = mockPaymentIntents.get(paymentIntentId);
+  if (!paymentIntent) {
+    throw new Error('Payment intent not found');
+  }
+
+  if (!['succeeded', 'processing'].includes(paymentIntent.status)) {
+    throw new Error(`Cannot refund payment in status: ${paymentIntent.status}`);
+  }
+
+  // Cancel the payment intent (release the authorized hold)
+  paymentIntent.status = 'canceled';
+  paymentIntent.canceled_at = new Date().toISOString();
+  paymentIntent.cancellation_reason = 'id_verification_failed';
+  mockPaymentIntents.set(paymentIntentId, paymentIntent);
+
+  const result = {
+    paymentIntentId: paymentIntentId,
+    status: 'canceled',
+    canceledAt: paymentIntent.canceled_at,
+    message: 'Authorized hold released. No charge made.',
+    amount: 0 // No charge made
+  };
+
+  console.log(`🧪 Mock Stripe: RELEASED authorized hold ${paymentIntentId}`);
+  console.log(`   No funds charged - hold is released`);
   return result;
 };
 
@@ -141,11 +270,9 @@ export const verifyDealerSubscription = async (sessionId: string) => {
     throw new Error('Mock subscription session not found');
   }
   
-  // Mark as completed
   session.status = 'complete';
   mockSessions.set(sessionId, session);
   
-  // Create mock subscription
   const subscription = {
     id: session.subscription,
     customer: session.customer,
@@ -173,7 +300,7 @@ export const verifyDealerSubscription = async (sessionId: string) => {
 };
 
 // =============================================
-// WEBHOOK SUPPORT
+// WEBHOOK & UTILITY FUNCTIONS
 // =============================================
 
 export const verifyWebhookSignature = (
@@ -181,7 +308,6 @@ export const verifyWebhookSignature = (
   signature: string,
   secret: string
 ): any => {
-  // Mock webhook event - just parse the payload
   try {
     const event = JSON.parse(payload);
     console.log(`🧪 Mock Stripe: Webhook event ${event.type}`);
@@ -213,10 +339,6 @@ export const getCustomerDetails = async (customerId: string) => {
   return customer;
 };
 
-// =============================================
-// SUBSCRIPTION MANAGEMENT FUNCTIONS
-// =============================================
-
 export const getDealerSubscriptionDetails = async (subscriptionId: string) => {
   await mockDelay();
   
@@ -237,7 +359,6 @@ export const cancelDealerSubscription = async (subscriptionId: string) => {
     throw new Error('Mock subscription not found');
   }
   
-  // Update subscription status to cancelled
   subscription.status = 'canceled';
   subscription.canceledAt = new Date();
   subscription.cancelAtPeriodEnd = true;
@@ -260,18 +381,17 @@ export const updateDealerSubscriptionPlan = async (
   }
   
   const planLimits = {
-    tier1: 50,    // Starter: $199/month for 50 verifications
-    tier2: 350,   // Business: $999/month for 350 verifications  
-    tier3: 3000   // Enterprise: $3799/month for 3000 verifications
+    tier1: 50,
+    tier2: 350,
+    tier3: 3000
   };
   
   const planPrices = {
-    tier1: 19900,  // $199.00 in cents
-    tier2: 99900,  // $999.00 in cents
-    tier3: 379900  // $3799.00 in cents
+    tier1: 19900,
+    tier2: 99900,
+    tier3: 379900
   };
   
-  // Update subscription details
   subscription.planTier = newPlan;
   subscription.monthlyQueryLimit = planLimits[newPlan];
   subscription.amount = planPrices[newPlan];
@@ -291,7 +411,6 @@ export const resumeDealerSubscription = async (subscriptionId: string) => {
     throw new Error('Mock subscription not found');
   }
   
-  // Resume cancelled subscription
   subscription.status = 'active';
   subscription.canceledAt = null;
   subscription.cancelAtPeriodEnd = false;
@@ -310,7 +429,6 @@ export const updateDealerBillingInfo = async (customerId: string, billingData: a
     throw new Error('Mock customer not found');
   }
   
-  // Update customer billing information
   customer.billingDetails = {
     ...customer.billingDetails,
     ...billingData,
@@ -323,12 +441,9 @@ export const updateDealerBillingInfo = async (customerId: string, billingData: a
   return customer;
 };
 
-// =============================================
-// INITIALIZATION
-// =============================================
-
 export const initStripe = () => {
   console.log('🧪 Mock Stripe service initialized');
+  console.log('💡 Safe Capture Flow: authorize → ID check → capture only if ID passes');
   console.log('💡 To use real Stripe, set STRIPE_SECRET_KEY in .env and restart');
   return { mock: true };
 };

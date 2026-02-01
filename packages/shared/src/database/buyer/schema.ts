@@ -1,5 +1,43 @@
 import { z } from 'zod';
-import { emailSchema, phoneNumberSchema, paymentStatusSchema } from '../../common/schema.js';
+import { emailSchema, phoneNumberSchema } from '../../common/schema.js';
+
+// =============================================
+// PAYMENT STATUS SCHEMA
+// =============================================
+
+/**
+ * Payment status state machine for safe capture flow
+ * 
+ * Flow: pending → authorized → id_check_started → id_check_passed → completed
+ * 
+ * States:
+ * - pending: User clicked "Buy", hasn't submitted payment form yet
+ * - authorized: Stripe authorized funds (manual capture enabled, funds held, NOT charged)
+ * - id_check_started: Persona inquiry created, user starting ID verification
+ * - id_check_passed: Persona webhook confirmed ID verification successful
+ * - completed: Stripe captured funds, full verification complete (USER CHARGED)
+ * - failed: Payment method declined OR ID check failed
+ * - authorized_refunded: Stripe refunded authorized hold (ID check failed before capture, NO CHARGE)
+ * - completed_refunded: Stripe refunded captured payment (buyer refund request)
+ * - error: Unexpected error state (requires manual intervention)
+ * 
+ * Backward compatibility:
+ * - 'succeeded' → old status, now maps to 'completed'
+ * - 'refunded' → old status, now maps to 'completed_refunded'
+ */
+export const paymentStatusSchema = z.enum([
+  'pending',
+  'authorized',
+  'id_check_started',
+  'id_check_passed',
+  'completed',
+  'failed',
+  'authorized_refunded',
+  'completed_refunded',
+  'error',
+  'succeeded',        // Backward compat - old status
+  'refunded'          // Backward compat - old status
+]);
 
 // =============================================
 // BUYER ACCOUNT MANAGEMENT
@@ -17,6 +55,8 @@ export const buyerRegistrationSchema = z.object({
 });
 
 // Complete buyer account database entity schema
+// ⚠️ NOTE: These columns map to buyer_accounts table
+// Adding new columns requires database migration
 export const buyerAccountSchema = z.object({
   id: z.string().uuid(),
   auth_id: z.string().uuid(), // References auth.users(id) - Supabase auth
@@ -29,8 +69,19 @@ export const buyerAccountSchema = z.object({
   // Immutable reference for ZKP hashes (CCPA compliant)
   buyer_reference_id: z.string(), // 'BUY_a8b9c2d1' - survives account deletion
   
-  // Verification status
-  verification_status: z.enum(['pending', 'verified', 'expired', 'rejected']).default('pending'),
+  // =============================================
+  // VERIFICATION STATUS
+  // =============================================
+  // Verification status - tracks ID verification progress
+  // States: pending → id_check_started → id_check_passed → verified
+  verification_status: z.enum([
+    'pending',
+    'id_check_started',
+    'id_check_passed',
+    'verified',
+    'expired',
+    'rejected'
+  ]).default('pending'),
   verified_at: z.string().datetime().optional(),
   verification_expires_at: z.string().datetime().optional(),
   
@@ -41,12 +92,30 @@ export const buyerAccountSchema = z.object({
   privado_did: z.string().optional(),
   privado_credential_id: z.string().optional(),
   
-  // One-time payment (using common payment status)
+  // =============================================
+  // PAYMENT STATUS
+  // =============================================
+  // Payment status - tracks payment flow
+  // Safe Capture Flow:
+  // 1. pending: User clicked "Buy"
+  // 2. authorized: Stripe authorized (funds held, NOT charged yet)
+  // 3. id_check_started: Persona inquiry created
+  // 4. id_check_passed: ID verification passed
+  // 5. completed: Stripe captured (funds charged)
+  //
+  // Error states:
+  // - failed: Payment declined or ID check failed
+  // - authorized_refunded: Authorized hold released (no charge)
+  // - completed_refunded: Captured payment refunded
+  // - error: Unexpected error
+  // - succeeded: Backward compat (old status)
+  // - refunded: Backward compat (old status)
   payment_status: paymentStatusSchema.default('pending'),
   
-  // Activity tracking (from migration)
+  // Activity tracking
   last_logged_in: z.string().datetime().optional(),
   
+  // Timestamps
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
 });

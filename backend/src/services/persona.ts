@@ -1,196 +1,298 @@
-// Persona service - Identity verification for buyer registration
-// Handles driver's license verification and data extraction for CA2ACHAIN identity-as-a-service
-// Core workflow: Create inquiry → Verify ID → Extract data → Store encrypted
+/**
+ * Persona Service - Identity verification for buyer registration
+ * Integrated with SAFE PAYMENT CAPTURE FLOW
+ * 
+ * Flow:
+ * 1. Create inquiry → buyer completes ID verification
+ * 2. Persona webhook fires with result (passed/failed)
+ * 3. If PASSED: call /payments/buyer/capture to charge the card
+ * 4. If FAILED: call /payments/buyer/refund-hold to release the authorized hold
+ */
 
 import type { EncryptedPersonaData } from '@ca2achain/shared';
-import { getCurrentTimestamp } from './utilities.js';
+
+const mockDelay = (ms: number = 100) => new Promise(resolve => setTimeout(resolve, ms));
+
+console.log('🧪 Using MOCK Persona service for development');
+
+// In-memory mock storage
+const mockInquiries = new Map();
+const mockVerifiedData = new Map();
 
 // =============================================
-// PERSONA API INTEGRATION
+// CREATE INQUIRY (Start ID Verification)
 // =============================================
-
-const PERSONA_API_URL = 'https://withpersona.com/api/v1';
 
 /**
  * Create new identity verification inquiry for buyer
- * Returns session token for buyer to complete verification
+ * Returns inquiry ID and session token for buyer to complete verification
  */
 export const createBuyerInquiry = async (buyerId: string): Promise<{ inquiryId: string; sessionToken: string }> => {
-  if (!process.env.PERSONA_API_KEY) {
-    throw new Error('PERSONA_API_KEY environment variable is required');
-  }
+  await mockDelay();
 
-  if (!process.env.PERSONA_TEMPLATE_ID) {
-    throw new Error('PERSONA_TEMPLATE_ID environment variable is required');
-  }
+  const inquiryId = `inq_mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const sessionToken = `session_mock_${Math.random().toString(36).slice(2, 8)}`;
 
-  try {
-    const response = await fetch(`${PERSONA_API_URL}/inquiries`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.PERSONA_API_KEY}`,
-      },
-      body: JSON.stringify({
-        data: {
-          type: 'inquiry',
-          attributes: {
-            'inquiry-template-id': process.env.PERSONA_TEMPLATE_ID,
-            'reference-id': buyerId,
-          }
-        }
-      })
-    });
+  // Store inquiry for later retrieval
+  mockInquiries.set(inquiryId, {
+    id: inquiryId,
+    buyer_id: buyerId,
+    status: 'created',
+    'reference-id': buyerId,
+    'session-token': sessionToken,
+    'created-at': new Date().toISOString()
+  });
 
-    if (!response.ok) {
-      throw new Error(`Persona API error: ${response.status}`);
-    }
+  console.log(`✅ Persona inquiry created for buyer ${buyerId}: ${inquiryId}`);
+  console.log(`   Session token: ${sessionToken}`);
+  console.log(`   Next: User completes ID verification in modal`);
 
-    const data = await response.json() as any;
-    
-    // Type guard for Persona API response
-    if (!data?.data?.id || !data?.data?.attributes?.['session-token']) {
-      throw new Error('Invalid Persona API response format');
-    }
-    
-    console.log(`✅ Persona inquiry created for buyer ${buyerId}: ${data.data.id}`);
-    
-    return {
-      inquiryId: data.data.id,
-      sessionToken: data.data.attributes['session-token']
-    };
-
-  } catch (error) {
-    console.error('❌ Failed to create Persona inquiry:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    throw new Error(`Persona inquiry creation failed: ${errorMessage}`);
-  }
+  return {
+    inquiryId,
+    sessionToken
+  };
 };
+
+// =============================================
+// GET VERIFICATION DATA (After ID Check Completes)
+// =============================================
 
 /**
- * Check verification status and extract verified data
- * Called after buyer completes verification to get results
+ * Get verification data and results
+ * Called after buyer completes ID verification (via webhook)
+ * 
+ * Returns driver's license data extracted by Persona
  */
 export const getVerificationData = async (inquiryId: string): Promise<EncryptedPersonaData | null> => {
-  if (!process.env.PERSONA_API_KEY) {
-    throw new Error('PERSONA_API_KEY environment variable is required');
+  await mockDelay();
+
+  // Check if already verified
+  const verifiedData = mockVerifiedData.get(inquiryId);
+  if (verifiedData) {
+    console.log(`✅ Retrieved cached verification data for inquiry ${inquiryId}`);
+    return verifiedData;
   }
 
-  try {
-    const response = await fetch(`${PERSONA_API_URL}/inquiries/${inquiryId}`, {
-      headers: {
-        'Authorization': `Bearer ${process.env.PERSONA_API_KEY}`,
-      }
-    });
+  // Check inquiry status
+  const inquiry = mockInquiries.get(inquiryId);
+  if (!inquiry) {
+    throw new Error(`Inquiry ${inquiryId} not found`);
+  }
 
-    if (!response.ok) {
-      throw new Error(`Persona API error: ${response.status}`);
-    }
+  // In mock mode, simulate auto-approval after 2 seconds
+  // In real Persona flow: webhook fires when user completes verification
+  if (inquiry.status === 'created') {
+    console.log(`⏳ Verification in progress for inquiry ${inquiryId}`);
+    return null;
+  }
 
-    const data = await response.json() as any;
-    
-    // Type guard for Persona API response
-    if (!data?.data) {
-      throw new Error('Invalid Persona API response format');
-    }
-    
-    const inquiry = data.data;
+  if (inquiry.status !== 'completed' || inquiry['decision-status'] !== 'approved') {
+    console.log(`❌ Verification not approved for inquiry ${inquiryId}: ${inquiry.status}`);
+    return null;
+  }
 
-    // Check if verification is complete and approved
-    if (inquiry.attributes?.status !== 'completed' || inquiry.attributes?.['decision-status'] !== 'approved') {
-      console.log(`⏳ Verification not complete for inquiry ${inquiryId}: ${inquiry.attributes?.status || 'unknown'}`);
-      return null;
-    }
-
-    // Extract driver's license data from verification results
-    const verifications = data.included?.filter((item: any) => item.type === 'verification') || [];
-    const documentVerification = verifications.find((v: any) => 
-      v.attributes?.['verification-template']?.name?.includes('government-id') ||
-      v.attributes?.['document-type'] === 'drivers-license'
-    );
-
-    if (!documentVerification) {
-      throw new Error('Driver\'s license verification not found');
-    }
-
-    // Extract verified data using existing schema structure
-    const extractedData = documentVerification.attributes?.extracted || {};
-    
-    const personaData: EncryptedPersonaData = {
-      driver_license: {
-        dl_number: extractedData['identification-number'] || '',
-        date_of_birth: extractedData.birthdate || '',
-        full_name: {
-          first_name: extractedData['first-name'] || '',
-          last_name: extractedData['last-name'] || ''
-        },
-        address: {
-          street: extractedData['address-street-1'] || '',
-          street_2: extractedData['address-street-2'],
-          city: extractedData['address-city'] || '',
-          state: extractedData['address-subdivision'] || '',
-          zip_code: extractedData['address-postal-code'] || '',
-          country: 'US'
-        },
-        issuing_state: extractedData['address-subdivision'] || '',
-        issued_date: extractedData['identification-issue-date'] || '',
-        expires_date: extractedData['identification-expiration-date'] || ''
+  // Extract driver's license data (mocked)
+  const personaData: EncryptedPersonaData = {
+    driver_license: {
+      dl_number: 'D1234567',
+      date_of_birth: '1990-05-15',
+      full_name: {
+        first_name: 'John',
+        last_name: 'Doe'
       },
-      persona_verification_results: {
-        verification_status: inquiry.attributes?.['decision-status'] === 'approved' ? 'passed' : 'failed',
-        confidence_scores: {
-          face_match: documentVerification.attributes?.['confidence-score'],
-          document_authenticity: documentVerification.attributes?.['document-confidence-score']
-        },
-        persona_session_id: inquiryId
-      }
+      address: {
+        street: '123 Main St',
+        street_2: undefined,
+        city: 'Los Angeles',
+        state: 'CA',
+        zip_code: '90001',
+        country: 'US'
+      },
+      issuing_state: 'CA',
+      issued_date: '2015-05-20',
+      expires_date: '2025-05-20'
+    },
+    persona_verification_results: {
+      verification_status: 'passed',
+      confidence_scores: {
+        face_match: 0.98,
+        document_authenticity: 0.99
+      },
+      persona_session_id: inquiryId
+    }
+  };
+
+  // Cache the result
+  mockVerifiedData.set(inquiryId, personaData);
+
+  console.log(`✅ Verification data extracted for inquiry ${inquiryId}`);
+  console.log(`   Status: PASSED`);
+  console.log(`   Verified: John Doe, DL# D1234567`);
+  return personaData;
+};
+
+// =============================================
+// WEBHOOK HANDLING (Payment Integration)
+// =============================================
+
+/**
+ * Process Persona webhook
+ * Called when buyer completes ID verification
+ * Integrates with safe payment capture flow
+ */
+export const verifyPersonaWebhook = async (
+  payload: any,
+  signature: string
+): Promise<{
+  inquiryId: string;
+  buyerId: string;
+  status: 'passed' | 'failed';
+  nextAction: 'capture_payment' | 'refund_hold';
+}> => {
+  await mockDelay();
+
+  // In production: verify webhook signature
+  // For mock: just validate payload structure
+
+  const inquiryId = payload.data?.inquiry_id;
+  const status = payload.data?.status;
+  const buyerId = payload.data?.attributes?.['reference-id'];
+
+  if (!inquiryId || !status || !buyerId) {
+    throw new Error('Invalid webhook payload');
+  }
+
+  console.log(`📨 Persona webhook received for inquiry ${inquiryId}`);
+  console.log(`   Status: ${status}`);
+  console.log(`   Buyer: ${buyerId}`);
+
+  // Update inquiry status
+  const inquiry = mockInquiries.get(inquiryId);
+  if (inquiry) {
+    inquiry.status = 'completed';
+    inquiry['decision-status'] = status === 'passed' ? 'approved' : 'rejected';
+    mockInquiries.set(inquiryId, inquiry);
+  }
+
+  // Determine next action based on ID verification result
+  if (status === 'passed') {
+    console.log(`✅ ID VERIFICATION PASSED for ${buyerId}`);
+    console.log(`   Next Action: CAPTURE PAYMENT (charge the card)`);
+    
+    return {
+      inquiryId,
+      buyerId,
+      status: 'passed',
+      nextAction: 'capture_payment' // Payment endpoint will be called next
     };
-
-    console.log(`✅ Verification data extracted for inquiry ${inquiryId}`);
-    return personaData;
-
-  } catch (error) {
-    console.error('❌ Failed to get verification data:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    throw new Error(`Verification data retrieval failed: ${errorMessage}`);
+  } else {
+    console.log(`❌ ID VERIFICATION FAILED for ${buyerId}`);
+    console.log(`   Next Action: REFUND HOLD (release authorized funds, no charge)`);
+    
+    return {
+      inquiryId,
+      buyerId,
+      status: 'failed',
+      nextAction: 'refund_hold' // Payment endpoint will be called next
+    };
   }
 };
+
+// =============================================
+// INQUIRY STATUS FUNCTIONS
+// =============================================
 
 /**
  * Get inquiry status without extracting full data
  * Used for checking verification progress
  */
 export const getInquiryStatus = async (inquiryId: string): Promise<{ status: string; decision?: string }> => {
-  if (!process.env.PERSONA_API_KEY) {
-    throw new Error('PERSONA_API_KEY environment variable is required');
+  await mockDelay();
+
+  const inquiry = mockInquiries.get(inquiryId);
+  if (!inquiry) {
+    throw new Error(`Inquiry ${inquiryId} not found`);
   }
 
-  try {
-    const response = await fetch(`${PERSONA_API_URL}/inquiries/${inquiryId}`, {
-      headers: {
-        'Authorization': `Bearer ${process.env.PERSONA_API_KEY}`,
+  return {
+    status: inquiry.status || 'unknown',
+    decision: inquiry['decision-status']
+  };
+};
+
+/**
+ * Get inquiry by buyer ID
+ */
+export const getInquiryByBuyerId = async (buyerId: string): Promise<any | null> => {
+  await mockDelay();
+
+  for (const [, inquiry] of mockInquiries) {
+    if (inquiry.buyer_id === buyerId) {
+      return inquiry;
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Check if buyer is verified
+ */
+export const isBuyerVerified = async (buyerId: string): Promise<boolean> => {
+  await mockDelay();
+
+  const inquiry = await getInquiryByBuyerId(buyerId);
+  return inquiry?.['decision-status'] === 'approved';
+};
+
+/**
+ * Get verified persona data (for internal use)
+ * Returns the cached extracted data
+ */
+export const getVerifiedPersonaData = async (inquiryId: string): Promise<EncryptedPersonaData | null> => {
+  await mockDelay();
+
+  return mockVerifiedData.get(inquiryId) || null;
+};
+
+// =============================================
+// MOCK WEBHOOK SIMULATION
+// =============================================
+
+/**
+ * Simulate Persona webhook after delay (for testing)
+ * In production: Persona calls your webhook endpoint
+ */
+export const simulatePersonaWebhook = async (
+  inquiryId: string,
+  shouldPass: boolean = true
+) => {
+  console.log(`\n⏳ Simulating Persona webhook in 2 seconds...`);
+  
+  // Wait 2 seconds
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  const inquiry = mockInquiries.get(inquiryId);
+  if (!inquiry) {
+    throw new Error(`Inquiry ${inquiryId} not found`);
+  }
+
+  const payload = {
+    id: `webhook_mock_${Date.now()}`,
+    data: {
+      inquiry_id: inquiryId,
+      status: shouldPass ? 'passed' : 'failed',
+      attributes: {
+        'reference-id': inquiry.buyer_id,
+        verified_at: new Date().toISOString()
       }
-    });
+    },
+    created_at: new Date().toISOString()
+  };
 
-    if (!response.ok) {
-      throw new Error(`Persona API error: ${response.status}`);
-    }
+  // Process webhook
+  const result = await verifyPersonaWebhook(payload, '');
 
-    const data = await response.json() as any;
-    
-    // Type guard for Persona API response
-    if (!data?.data?.attributes) {
-      throw new Error('Invalid Persona API response format');
-    }
-    
-    return {
-      status: data.data.attributes.status || 'unknown',
-      decision: data.data.attributes['decision-status']
-    };
-
-  } catch (error) {
-    console.error('❌ Failed to get inquiry status:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    throw new Error(`Inquiry status check failed: ${errorMessage}`);
-  }
+  console.log(`\n📨 Webhook processed: ${result.nextAction}`);
+  return result;
 };
